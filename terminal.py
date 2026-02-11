@@ -28,6 +28,7 @@ colorama_init()
 
 SERVER_HOST = 'localhost'
 SERVER_PORT = 9999
+_input_prompt_active = False
 
 # ─── Visitor ID ───
 
@@ -53,10 +54,17 @@ def print_ack(body_type: str):
     sys.stdout.flush()
 
 
+def _ensure_async_line_break():
+    """Avoid async stage output being appended onto the active input prompt."""
+    if _input_prompt_active:
+        print()
+
+
 # ─── Progressive Stage Display ───
 
 async def on_stage(stage: str, data: dict):
     """Called by heartbeat after each pipeline stage. Prints immediately."""
+    _ensure_async_line_break()
 
     if stage == 'sensorium':
         print(f"  {Fore.CYAN}[Sensorium]{Style.RESET_ALL} "
@@ -408,6 +416,7 @@ async def _drop_single(content: str, visitor_id: str):
 
 async def client_mode():
     """Connect to a running heartbeat_server."""
+    global _input_prompt_active
     visitor_id = get_or_create_visitor_id()
 
     try:
@@ -435,11 +444,14 @@ async def client_mode():
     try:
         while not disconnected.is_set():
             try:
+                _input_prompt_active = True
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: input(f"  {Fore.WHITE}you:{Style.RESET_ALL} ").strip()
                 )
             except EOFError:
                 break
+            finally:
+                _input_prompt_active = False
 
             if disconnected.is_set():
                 break
@@ -515,10 +527,12 @@ async def _client_reader(reader: asyncio.StreamReader, disconnected: asyncio.Eve
             msg_type = msg.get('type')
 
             if msg_type == 'ack':
+                _ensure_async_line_break()
                 print(f"  {Fore.CYAN}{msg.get('body', '...')}{Style.RESET_ALL}")
                 sys.stdout.flush()
 
             elif msg_type == 'stream':
+                _ensure_async_line_break()
                 stage = msg.get('stage', '')
                 data = msg.get('data', '')
                 color = {
@@ -532,6 +546,7 @@ async def _client_reader(reader: asyncio.StreamReader, disconnected: asyncio.Eve
                 sys.stdout.flush()
 
             elif msg_type == 'dialogue':
+                _ensure_async_line_break()
                 expr = msg.get('expression', 'neutral')
                 text = msg.get('text', '...')
                 print()
@@ -541,22 +556,27 @@ async def _client_reader(reader: asyncio.StreamReader, disconnected: asyncio.Eve
                 sys.stdout.flush()
 
             elif msg_type == 'farewell':
+                _ensure_async_line_break()
                 print(f"\n  {Fore.WHITE}{msg.get('body', '')}{Style.RESET_ALL}")
                 sys.stdout.flush()
 
             elif msg_type == 'drop_ack':
+                _ensure_async_line_break()
                 print(f"  {Fore.WHITE}{msg.get('body', '')}{Style.RESET_ALL}\n")
                 sys.stdout.flush()
 
             elif msg_type == 'busy':
+                _ensure_async_line_break()
                 print(f"  {Fore.WHITE}{msg.get('body', '')}{Style.RESET_ALL}\n")
                 sys.stdout.flush()
 
             elif msg_type == 'timeout':
+                _ensure_async_line_break()
                 print(f"\n  {Fore.RED}[Timeout]{Style.RESET_ALL} {msg.get('body', '')}\n")
                 sys.stdout.flush()
 
             elif msg_type == 'rejected':
+                _ensure_async_line_break()
                 print(f"\n  {Fore.RED}{msg.get('body', 'Connection rejected.')}{Style.RESET_ALL}\n")
                 sys.stdout.flush()
                 disconnected.set()
@@ -574,6 +594,7 @@ async def _client_reader(reader: asyncio.StreamReader, disconnected: asyncio.Eve
 
 async def standalone_mode():
     """Run with heartbeat in-process."""
+    global _input_prompt_active
     # Check API key
     if not os.environ.get('ANTHROPIC_API_KEY'):
         print(f"\n  {Fore.RED}[Error]{Style.RESET_ALL} ANTHROPIC_API_KEY not set.")
@@ -640,11 +661,14 @@ async def standalone_mode():
         while True:
             # Get user input
             try:
+                _input_prompt_active = True
                 user_input = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: input(f"  {Fore.WHITE}you:{Style.RESET_ALL} ").strip()
                 )
             except EOFError:
                 break
+            finally:
+                _input_prompt_active = False
 
             if not user_input:
                 continue
