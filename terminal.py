@@ -27,8 +27,18 @@ from seed import seed, check_needs_seed
 
 colorama_init()
 
-SERVER_HOST = 'localhost'
-SERVER_PORT = 9999
+def _get_server_port() -> int:
+    raw_port = os.environ.get('SHOPKEEPER_PORT', '9999').strip()
+    try:
+        port = int(raw_port)
+    except ValueError:
+        return 9999
+    return port if 1 <= port <= 65535 else 9999
+
+
+SERVER_HOST = os.environ.get('SHOPKEEPER_HOST', '127.0.0.1')
+SERVER_PORT = _get_server_port()
+SERVER_TOKEN = os.environ.get('SHOPKEEPER_SERVER_TOKEN', '').strip()
 _input_prompt_active = False
 
 # ─── Visitor ID ───
@@ -420,6 +430,11 @@ async def client_mode():
     global _input_prompt_active
     visitor_id = get_or_create_visitor_id()
 
+    if not SERVER_TOKEN:
+        print(f"\n  {Fore.RED}[Error]{Style.RESET_ALL} SHOPKEEPER_SERVER_TOKEN not set.")
+        print(f"  Run: export SHOPKEEPER_SERVER_TOKEN='a-long-random-token'\n")
+        return
+
     try:
         reader, writer = await asyncio.open_connection(SERVER_HOST, SERVER_PORT)
     except ConnectionRefusedError:
@@ -436,6 +451,7 @@ async def client_mode():
     if not await _client_send(writer, {
         'type': 'visitor_connect',
         'visitor_id': visitor_id,
+        'token': SERVER_TOKEN,
     }):
         return
 

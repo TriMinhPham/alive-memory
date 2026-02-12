@@ -267,6 +267,23 @@ CREATE TABLE IF NOT EXISTS cycle_log (
     next_cycle_hints JSON,
     ts TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS day_memory (
+    id TEXT PRIMARY KEY,
+    ts TIMESTAMP NOT NULL,
+    salience FLOAT NOT NULL,
+    moment_type TEXT NOT NULL,
+    visitor_id TEXT,
+    summary TEXT NOT NULL,
+    raw_refs JSON,
+    tags JSON,
+    retry_count INTEGER DEFAULT 0,
+    processed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_day_memory_salience ON day_memory(salience DESC);
+CREATE INDEX IF NOT EXISTS idx_day_memory_visitor ON day_memory(visitor_id);
+CREATE INDEX IF NOT EXISTS idx_day_memory_unprocessed ON day_memory(processed_at) WHERE processed_at IS NULL;
 """
 
 
@@ -986,7 +1003,7 @@ async def get_days_alive() -> int:
 async def get_last_creative_cycle() -> Optional[dict]:
     conn = await get_db()
     cursor = await conn.execute(
-        "SELECT * FROM cycle_log WHERE mode = 'autonomous' ORDER BY ts DESC LIMIT 1"
+        "SELECT * FROM cycle_log WHERE mode IN ('express', 'autonomous') ORDER BY ts DESC LIMIT 1"
     )
     row = await cursor.fetchone()
     if not row:
@@ -997,3 +1014,175 @@ async def get_last_creative_cycle() -> Optional[dict]:
         'dialogue': row['dialogue'],
         'internal_monologue': row['internal_monologue'],
     }
+
+
+# ─── Day Memory ───
+
+_MAX_DAY_MEMORIES = 30
+
+
+async def insert_day_memory(moment) -> None:
+    """Insert a day memory entry. Enforces MAX_DAY_MEMORIES cap.
+
+    Atomic: count + evict + insert run inside a single transaction to
+    prevent concurrent inserts from overshooting the cap.
+    """
+    async with transaction():
+        conn = await get_db()
+
+        cursor = await conn.execute("SELECT COUNT(*) as cnt FROM day_memory")
+        row = await cursor.fetchone()
+        count = row['cnt'] if row else 0
+
+        if count >= _MAX_DAY_MEMORIES:
+            # Evict lowest-salience entry
+            await conn.execute(
+                "DELETE FROM day_memory WHERE id = ("
+                "  SELECT id FROM day_memory ORDER BY salience ASC LIMIT 1"
+                ")"
+            )
+
+        await conn.execute(
+            """INSERT INTO day_memory
+               (id, ts, salience, moment_type, visitor_id, summary, raw_refs, tags, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (moment.id, moment.ts.isoformat(), moment.salience, moment.moment_type,
+             moment.visitor_id, moment.summary, json.dumps(moment.raw_refs),
+             json.dumps(moment.tags), datetime.now(timezone.utc).isoformat())
+        )
+        # commit is handled by transaction().__aexit__
+
+
+def _jst_today_start_utc() -> str:
+    """Return start of today (JST) as UTC ISO string for day_memory filtering.
+
+    Day memory is scoped to the current JST day. This computes midnight JST
+    converted to UTC so we can filter the UTC timestamps stored in day_memory.
+    """
+    now_jst = datetime.now(JST)
+    start_of_day_jst = now_jst.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_day_utc = start_of_day_jst.astimezone(timezone.utc)
+    return start_of_day_utc.isoformat()
+
+
+async def get_day_memory(
+    visitor_id: str = None,
+    limit: int = 3,
+    min_salience: float = 0.3,
+) -> list:
+    """Get today's day memory entries, optionally filtered by visitor and salience."""
+    conn = await get_db()
+    today_start = _jst_today_start_utc()
+    if visitor_id:
+        cursor = await conn.execute(
+            """SELECT * FROM day_memory
+               WHERE visitor_id = ? AND salience >= ? AND processed_at IS NULL
+                     AND ts >= ?
+               ORDER BY salience DESC LIMIT ?""",
+            (visitor_id, min_salience, today_start, limit)
+        )
+    else:
+        cursor = await conn.execute(
+            """SELECT * FROM day_memory
+               WHERE salience >= ? AND processed_at IS NULL
+                     AND ts >= ?
+               ORDER BY salience DESC LIMIT ?""",
+            (min_salience, today_start, limit)
+        )
+    rows = await cursor.fetchall()
+    return [_row_to_day_memory(r) for r in rows]
+
+
+async def get_unprocessed_day_memory(
+    min_salience: float = 0.4,
+    limit: int = 7,
+) -> list:
+    """Get ALL unprocessed day memory entries for sleep consolidation.
+
+    No date filter here — sleep runs at 03:00 JST and must consolidate
+    moments from the entire prior waking period (which spans two calendar
+    days, e.g. 06:00 JST yesterday through 02:00 JST today). The
+    delete_stale_day_memory() safety net prevents unbounded accumulation.
+    """
+    conn = await get_db()
+    cursor = await conn.execute(
+        """SELECT * FROM day_memory
+           WHERE processed_at IS NULL AND salience >= ?
+           ORDER BY salience DESC LIMIT ?""",
+        (min_salience, limit)
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_day_memory(r) for r in rows]
+
+
+async def mark_day_memory_processed(moment_id: str) -> None:
+    """Stamp processed_at on a day memory entry."""
+    now = datetime.now(timezone.utc).isoformat()
+    await _exec_write(
+        "UPDATE day_memory SET processed_at = ? WHERE id = ?",
+        (now, moment_id)
+    )
+
+
+async def increment_day_memory_retry(moment_id: str) -> None:
+    """Increment retry_count for a failed day memory entry.
+
+    This is a standalone write — commits even when the calling
+    transaction has rolled back."""
+    await _exec_write(
+        "UPDATE day_memory SET retry_count = retry_count + 1 WHERE id = ?",
+        (moment_id,)
+    )
+
+
+async def delete_processed_day_memory() -> None:
+    """Delete day_memory rows where processed_at IS NOT NULL.
+
+    Calls _exec_write() directly — _exec_write() already acquires
+    _write_lock when called outside a transaction. Do NOT double-lock."""
+    await _exec_write(
+        "DELETE FROM day_memory WHERE processed_at IS NOT NULL"
+    )
+
+
+async def delete_stale_day_memory(max_age_days: int = 2) -> None:
+    """Delete day_memory rows older than max_age_days, regardless of status.
+
+    Safety net: prevents unprocessed moments from leaking across day
+    boundaries if sleep didn't process them (e.g. only top-K were selected).
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+    await _exec_write(
+        "DELETE FROM day_memory WHERE ts < ?",
+        (cutoff,)
+    )
+
+
+async def get_daily_summary_for_today() -> Optional[dict]:
+    """Check if a daily summary already exists for today (JST)."""
+    conn = await get_db()
+    today_jst = datetime.now(JST).date().isoformat()
+    cursor = await conn.execute(
+        "SELECT * FROM daily_summaries WHERE date = ?",
+        (today_jst,)
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+def _row_to_day_memory(row):
+    """Convert a DB row to a DayMemoryEntry."""
+    from pipeline.day_memory import DayMemoryEntry
+    return DayMemoryEntry(
+        id=row['id'],
+        ts=datetime.fromisoformat(row['ts']),
+        salience=row['salience'],
+        moment_type=row['moment_type'],
+        visitor_id=row['visitor_id'],
+        summary=row['summary'],
+        raw_refs=json.loads(row['raw_refs']) if row['raw_refs'] else {},
+        tags=json.loads(row['tags']) if row['tags'] else [],
+        retry_count=row['retry_count'],
+        processed_at=(datetime.fromisoformat(row['processed_at'])
+                       if row['processed_at'] else None),
+    )

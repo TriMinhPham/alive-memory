@@ -21,6 +21,7 @@ from pipeline.validator import validate
 from pipeline.executor import execute
 from pipeline.enrich import fetch_url_metadata
 from sleep import sleep_cycle
+from pipeline.day_memory import maybe_record_moment
 
 # Type for stage callbacks: async fn(stage_name, stage_data)
 StageCallback = Optional[Callable[[str, dict], Awaitable[None]]]
@@ -227,36 +228,36 @@ class Heartbeat:
 
         while self.running:
             try:
-                # ── Sleep cycle check ──
-                if self._should_sleep():
-                    self._last_sleep_date = datetime.now(JST).date().isoformat()
-                    try:
-                        await self._emit_stage('sleep', {'status': 'entering_sleep'})
-                        await sleep_cycle()
-                        await self._emit_stage('sleep', {'status': 'woke_up'})
-                    except Exception as e:
-                        print(f"  [Heartbeat] Sleep cycle error: {e}")
-                    # After sleep, continue the loop
-                    await self._interruptible_sleep(60)
-                    continue
-
-                # During sleep window, only process microcycles (visitor ACK)
-                if self._is_sleep_window():
-                    if self.pending_microcycle.is_set():
-                        self.pending_microcycle.clear()
-                        if not self.running:
-                            break
-                        await self.run_cycle('micro')
-                    else:
-                        await self._interruptible_sleep(60)
-                    continue
-
-                # ── Microcycle has priority (visitor triggered) ──
+                # ── Microcycle has top priority (even during sleep window) ──
+                # This MUST be checked before sleep to prevent deferral loops
+                # from starving visitor messages during 03:00-06:00 JST.
                 if self.pending_microcycle.is_set():
                     self.pending_microcycle.clear()
                     if not self.running:
                         break
                     await self.run_cycle('micro')
+                    continue
+
+                # ── Sleep cycle check ──
+                if self._should_sleep():
+                    try:
+                        await self._emit_stage('sleep', {'status': 'entering_sleep'})
+                        ran = await sleep_cycle()
+                        if ran:
+                            self._last_sleep_date = datetime.now(JST).date().isoformat()
+                            await self._emit_stage('sleep', {'status': 'woke_up'})
+                        else:
+                            # Deferred — do NOT stamp _last_sleep_date.
+                            # Will retry on next loop iteration.
+                            await self._emit_stage('sleep', {'status': 'deferred'})
+                    except Exception as e:
+                        print(f"  [Heartbeat] Sleep cycle error: {e}")
+                    await self._interruptible_sleep(60)
+                    continue
+
+                # ── Sleep window idle (sleep done or deferred, no microcycle) ──
+                if self._is_sleep_window():
+                    await self._interruptible_sleep(60)
                     continue
 
                 engagement = await db.get_engagement_state()
@@ -429,6 +430,7 @@ class Heartbeat:
 
         # 2. Load and update drives (persist inside transaction below)
         drives = await db.get_drives_state()
+        drives_before = drives.copy()  # snapshot for day_memory delta computation
         elapsed = (start_time - self._last_cycle_ts).total_seconds() / 3600.0
         self._last_cycle_ts = start_time
         drives, feelings = await update_drives(drives, elapsed, unread)
@@ -533,6 +535,7 @@ class Heartbeat:
             'cycle_type': routing.cycle_type,
             'energy': drives.energy,
             'turn_count': engagement.turn_count,
+            'trust_level': visitor.trust_level if visitor else 'stranger',
         }
         validated = validate(cortex_output, state)
 
@@ -612,6 +615,19 @@ class Heartbeat:
                 })
         self._error_backoff = 5  # reset backoff on successful cycle
 
+        # ── Day Memory: record salient moment from this cycle ──
+        try:
+            cycle_context = self._build_cycle_context(
+                cycle_id=cycle_id, mode=mode, visitor=visitor,
+                visitor_id=visitor_id, engagement=engagement,
+                drives_before=drives_before, drives_after=drives,
+                unread=unread, routing=routing, validated=validated,
+            )
+            await maybe_record_moment(validated, cycle_context)
+        except Exception as e:
+            # Day memory failure must not break the main cycle
+            print(f"  [DayMemory] Error recording moment: {e}")
+
         # Broadcast to all subscribers (bounded queues, drop oldest if full)
         for sub_id, q in list(self._cycle_log_subscribers.items()):
             while q.full():
@@ -651,6 +667,71 @@ class Heartbeat:
             features={'is_silence': True, 'idle_seconds': idle_seconds},
             salience=salience,
         )
+
+    def _build_cycle_context(
+        self,
+        cycle_id: str,
+        mode: str,
+        visitor,
+        visitor_id: str,
+        engagement,
+        drives_before,
+        drives_after,
+        unread: list,
+        routing,
+        validated: dict,
+    ) -> dict:
+        """Build the cycle_context dict for day memory moment extraction.
+
+        Deterministic — no DB calls, no LLM.
+        """
+        # Compute max drive delta
+        drive_fields = [
+            'social_hunger', 'curiosity', 'expression_need',
+            'rest_need', 'energy', 'mood_valence', 'mood_arousal',
+        ]
+        max_delta = 0.0
+        for field in drive_fields:
+            before_val = getattr(drives_before, field, 0.0)
+            after_val = getattr(drives_after, field, 0.0)
+            max_delta = max(max_delta, abs(after_val - before_val))
+
+        # Contradiction: internal_shift_candidate is emitted by the PREVIOUS
+        # cycle's hippocampus_consolidate, so it appears in THIS cycle's unread.
+        # The salience boost lands one cycle late — acceptable because the
+        # follow-up cycle is contextually adjacent to the contradiction.
+        had_contradiction = any(
+            e.event_type == 'internal_shift_candidate' for e in unread
+        )
+
+        # Abrupt end: visitor disconnected with few turns
+        is_abrupt_end = (
+            any(e.event_type == 'visitor_disconnect' for e in unread)
+            and engagement.turn_count < 3
+        )
+
+        # Silence moment: idle cycle after long silence during engagement
+        is_silence_moment = False
+        if (mode in ('ambient', 'idle')
+                and engagement.status == 'engaged'
+                and engagement.last_activity is not None):
+            idle_s = (datetime.now(timezone.utc) - engagement.last_activity).total_seconds()
+            is_silence_moment = idle_s > 1800
+
+        return {
+            'cycle_id': cycle_id,
+            'mode': mode,
+            'visitor_id': visitor_id,
+            'visitor_name': visitor.name if visitor else None,
+            'trust_level': visitor.trust_level if visitor else 'stranger',
+            'event_ids': [e.id for e in unread],
+            'max_drive_delta': max_delta,
+            'had_contradiction': had_contradiction,
+            'is_abrupt_end': is_abrupt_end,
+            'is_silence_moment': is_silence_moment,
+            'is_novel_topic': False,  # deferred to Phase 2
+            'turn_count': engagement.turn_count,
+        }
 
     def subscribe_cycle_logs(self, subscriber_id: str, maxsize: int = 50) -> asyncio.Queue:
         """Register a subscriber for cycle logs. Returns their personal queue."""
