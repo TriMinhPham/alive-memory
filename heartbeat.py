@@ -23,6 +23,7 @@ from pipeline.enrich import fetch_url_metadata
 from pipeline.arbiter import (
     ArbiterFocus, decide_cycle_focus, update_arbiter_after_cycle,
 )
+from pipeline.ambient import fetch_ambient_context
 from sleep import sleep_cycle
 
 # Type for stage callbacks: async fn(stage_name, stage_data)
@@ -142,6 +143,7 @@ class Heartbeat:
         self._stage_callback: StageCallback = None
         self._error_backoff = 5
         self._arbiter_state: Optional[dict] = None  # loaded from DB on start
+        self._last_ambient_fetch_ts: Optional[datetime] = None
 
     def _pick_fidget_behavior(self) -> tuple[str, str]:
         """Pick a fidget behavior while avoiding immediate repetition."""
@@ -337,6 +339,40 @@ class Heartbeat:
                 room = await db.get_room_state()
                 if room.shop_status == 'closed' and drives.energy > 0.5:
                     await db.update_room_state(shop_status='open')
+
+                # ── Ambient weather fetch (every 30-60 min) ──
+                ambient_stale = (
+                    self._last_ambient_fetch_ts is None
+                    or (datetime.now(timezone.utc) - self._last_ambient_fetch_ts).total_seconds() > 2400
+                )
+                if ambient_stale:
+                    try:
+                        ambient = await fetch_ambient_context()
+                        if ambient:
+                            self._last_ambient_fetch_ts = datetime.now(timezone.utc)
+                            # Inject as event for sensorium
+                            weather_event = Event(
+                                event_type='ambient_weather',
+                                source='ambient',
+                                payload={
+                                    'condition': ambient.condition,
+                                    'temp_c': ambient.temp_c,
+                                    'diegetic_text': ambient.diegetic_text,
+                                    'season': ambient.season,
+                                    'season_text': ambient.season_text,
+                                },
+                                channel='ambient',
+                                salience_base=0.1,
+                                ttl_hours=1.0,
+                            )
+                            await db.append_event(weather_event)
+                            # Nudge drives from weather
+                            if ambient.mood_nudge != 0:
+                                drives.mood_valence = max(-1.0, min(1.0,
+                                    drives.mood_valence + ambient.mood_nudge))
+                                await db.save_drives_state(drives)
+                    except Exception as e:
+                        print(f"  [Heartbeat] Ambient fetch error: {e}")
 
                 # Let the arbiter decide focus
                 focus = await decide_cycle_focus(drives, self._arbiter_state)

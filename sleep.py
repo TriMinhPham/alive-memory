@@ -11,12 +11,19 @@ async def sleep_cycle():
     # 1. Build day digest (code-first, no LLM)
     today_events = await db.get_events_today()
 
+    # Thread summary for digest
+    thread_counts = await db.get_thread_count_by_status()
+    active_threads = await db.get_active_threads(limit=5)
+    thread_titles = [t.title for t in active_threads]
+
     digest = {
         'visitors_today': count_unique_visitors(today_events),
         'visitor_bucket': bucket_visitors(today_events),
         'top_topics': extract_topics(today_events),
         'emotional_arc': compute_emotional_arc(today_events),
         'gifts_received': count_gifts(today_events),
+        'thread_counts': thread_counts,
+        'active_thread_titles': thread_titles,
     }
 
     # 2. Cortex writes journal (single call, budget-capped)
@@ -43,7 +50,10 @@ async def sleep_cycle():
     # 5. Trait stability review (code-first)
     await review_trait_stability()
 
-    # 6. Reset drives for morning
+    # 6. Thread lifecycle management
+    await manage_thread_lifecycle()
+
+    # 7. Reset drives for morning
     await reset_drives_for_morning()
 
 
@@ -131,6 +141,28 @@ async def review_trait_stability():
             days_old = (datetime.now(timezone.utc) - trait.observed_at).days
             if days_old > 7:
                 await db.update_trait_status(trait.id, 'archived')
+
+
+async def manage_thread_lifecycle():
+    """Transition dormant and archive stale threads during sleep.
+
+    - Threads untouched >48hr → dormant
+    - Dormant threads >7 days → archived
+    """
+    # Transition untouched threads to dormant
+    dormant_candidates = await db.get_dormant_threads(older_than_days=2)
+    for thread in dormant_candidates:
+        if thread.status in ('open', 'active'):
+            await db.touch_thread(
+                thread.id,
+                reason='sleep_cycle_dormant',
+                status='dormant',
+            )
+
+    # Archive stale dormant threads
+    archived_count = await db.archive_stale_threads(older_than_days=7)
+    if archived_count > 0:
+        print(f"  [Sleep] Archived {archived_count} stale threads.")
 
 
 async def reset_drives_for_morning():

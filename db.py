@@ -9,7 +9,7 @@ from typing import Optional
 from models.event import Event
 from models.state import (
     RoomState, DrivesState, EngagementState, Visitor, VisitorTrait,
-    Totem, CollectionItem, JournalEntry, DailySummary,
+    Totem, CollectionItem, JournalEntry, DailySummary, Thread,
 )
 
 # The shopkeeper lives in JST. All "today" boundaries use JST.
@@ -1088,6 +1088,147 @@ async def get_last_creative_cycle() -> Optional[dict]:
         'dialogue': row['dialogue'],
         'internal_monologue': row['internal_monologue'],
     }
+
+
+# ─── Threads ───
+
+def _row_to_thread(row) -> Thread:
+    return Thread(
+        id=row['id'],
+        thread_type=row['thread_type'],
+        title=row['title'],
+        status=row['status'],
+        priority=row['priority'],
+        content=row['content'],
+        resolution=row['resolution'],
+        created_at=(datetime.fromisoformat(row['created_at'])
+                    if row['created_at'] else None),
+        last_touched=(datetime.fromisoformat(row['last_touched'])
+                      if row['last_touched'] else None),
+        touch_count=row['touch_count'] or 0,
+        touch_reason=row['touch_reason'],
+        target_date=row['target_date'],
+        source_visitor_id=row['source_visitor_id'],
+        source_event_id=row['source_event_id'],
+        tags=json.loads(row['tags']) if row['tags'] else [],
+    )
+
+
+async def get_active_threads(limit: int = 3) -> list[Thread]:
+    """Get active/open threads sorted by priority then recency."""
+    conn = await get_db()
+    cursor = await conn.execute(
+        """SELECT * FROM threads
+           WHERE status IN ('open', 'active')
+           ORDER BY priority DESC, last_touched DESC
+           LIMIT ?""",
+        (limit,)
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_thread(r) for r in rows]
+
+
+async def get_thread_by_id(thread_id: str) -> Optional[Thread]:
+    conn = await get_db()
+    cursor = await conn.execute(
+        "SELECT * FROM threads WHERE id = ?", (thread_id,)
+    )
+    row = await cursor.fetchone()
+    return _row_to_thread(row) if row else None
+
+
+async def get_thread_by_title(title: str) -> Optional[Thread]:
+    """Exact case-insensitive match only. Returns None if 0 or >1 matches."""
+    conn = await get_db()
+    cursor = await conn.execute(
+        "SELECT * FROM threads WHERE LOWER(title) = LOWER(?) AND status != 'archived'",
+        (title,)
+    )
+    rows = await cursor.fetchall()
+    if len(rows) != 1:
+        return None  # ambiguous or not found — no silent wrong-thread writes
+    return _row_to_thread(rows[0])
+
+
+async def create_thread(thread_type: str, title: str, **kwargs) -> Thread:
+    """Create a new thread. Returns the created Thread."""
+    tid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    await _exec_write(
+        """INSERT INTO threads
+           (id, thread_type, title, status, priority, content, created_at,
+            last_touched, touch_count, tags, source_visitor_id, source_event_id,
+            target_date)
+           VALUES (?, ?, ?, 'open', ?, ?, ?, ?, 0, ?, ?, ?, ?)""",
+        (tid, thread_type, title,
+         kwargs.get('priority', 0.5),
+         kwargs.get('content', ''),
+         now, now,
+         json.dumps(kwargs.get('tags', [])),
+         kwargs.get('source_visitor_id'),
+         kwargs.get('source_event_id'),
+         kwargs.get('target_date'))
+    )
+    return await get_thread_by_id(tid)
+
+
+async def touch_thread(thread_id: str, reason: str,
+                       content: str = None, status: str = None):
+    """Update a thread's touch timestamp, reason, and optionally content/status."""
+    now = datetime.now(timezone.utc).isoformat()
+    updates = ["last_touched = ?", "touch_count = touch_count + 1",
+               "touch_reason = ?"]
+    vals = [now, reason]
+
+    if content is not None:
+        updates.append("content = ?")
+        vals.append(content)
+    if status is not None:
+        updates.append("status = ?")
+        vals.append(status)
+
+    vals.append(thread_id)
+    await _exec_write(
+        f"UPDATE threads SET {', '.join(updates)} WHERE id = ?",
+        tuple(vals)
+    )
+
+
+async def get_dormant_threads(older_than_hours: int = 48) -> list[Thread]:
+    """Get active threads untouched for >older_than_hours."""
+    conn = await get_db()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).isoformat()
+    cursor = await conn.execute(
+        """SELECT * FROM threads
+           WHERE status IN ('open', 'active')
+           AND last_touched < ?""",
+        (cutoff,)
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_thread(r) for r in rows]
+
+
+async def archive_stale_threads(older_than_days: int = 7) -> int:
+    """Archive dormant threads older than N days. Returns count."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+    conn = await get_db()
+    cursor = await conn.execute(
+        """UPDATE threads SET status = 'archived'
+           WHERE status = 'dormant' AND last_touched < ?""",
+        (cutoff,)
+    )
+    await conn.commit()
+    return cursor.rowcount
+
+
+async def get_thread_count_by_status() -> dict:
+    """Get thread counts by status. For peek command and sleep digest."""
+    conn = await get_db()
+    cursor = await conn.execute(
+        "SELECT status, COUNT(*) as cnt FROM threads GROUP BY status"
+    )
+    rows = await cursor.fetchall()
+    return {row['status']: row['cnt'] for row in rows}
 
 
 # ─── Arbiter State ───
