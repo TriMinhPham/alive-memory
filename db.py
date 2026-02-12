@@ -320,9 +320,16 @@ async def run_migrations(conn):
             sql = f.read_text()
             # Execute statements individually (executescript not available in aiosqlite)
             for stmt in sql.split(';'):
-                stmt = stmt.strip()
-                if stmt and not stmt.startswith('--'):
-                    await conn.execute(stmt)
+                # Strip comment-only lines before checking emptiness —
+                # a segment like "-- comment\nCREATE TABLE..." must not be
+                # skipped just because the first line is a comment.
+                lines = stmt.strip().splitlines()
+                cleaned = '\n'.join(
+                    line for line in lines
+                    if not line.strip().startswith('--')
+                ).strip()
+                if cleaned:
+                    await conn.execute(cleaned)
 
         await conn.execute(
             "INSERT INTO schema_version (version, filename) VALUES (?, ?)",
@@ -1367,6 +1374,19 @@ async def update_pool_item(pool_id: str, **kwargs):
     await _exec_write(
         f"UPDATE content_pool SET {', '.join(sets)} WHERE id = ?",
         tuple(vals)
+    )
+
+
+async def update_event_outcome(event_id: str, outcome: str,
+                                engaged_at: datetime = None) -> None:
+    """Update an event's outcome and engaged_at timestamp.
+
+    Used by executor to couple pool status changes with their source events.
+    """
+    ts = (engaged_at or datetime.now(timezone.utc)).isoformat()
+    await _exec_write(
+        "UPDATE events SET outcome = ?, engaged_at = ? WHERE id = ?",
+        (outcome, ts, event_id)
     )
 
 

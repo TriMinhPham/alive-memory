@@ -388,7 +388,8 @@ class Heartbeat:
                         self._last_feed_fetch_ts = datetime.now(timezone.utc)
                         # Expire old pool items + cap unseen count
                         await db.expire_pool_items()
-                        await db.cap_unseen_pool()
+                        from config.feeds import MAX_POOL_UNSEEN
+                        await db.cap_unseen_pool(max_unseen=MAX_POOL_UNSEEN)
                     except Exception as e:
                         print(f"  [Heartbeat] Feed ingestion error: {e}")
 
@@ -618,7 +619,8 @@ class Heartbeat:
                 routing.token_budget = focus_context.token_budget_hint
 
         # Creative cooldown gate: block express routing if < 2hrs since last creative
-        if routing.cycle_type == 'express' and not self._creative_cooldown_elapsed():
+        # Exception: arbiter thread focus explicitly requests express — don't override it
+        if routing.cycle_type == 'express' and not self._creative_cooldown_elapsed() and not focus_context:
             routing.cycle_type = 'idle'
             routing.token_budget = 3000
 

@@ -206,7 +206,7 @@ async def cortex_call(
                 age_days = (datetime.now(timezone.utc) - t.created_at).days
                 age_str = f" ({age_days}d old)" if age_days > 0 else " (new)"
             snippet = f" — {t.content[:80]}..." if t.content and len(t.content) > 80 else (f" — {t.content}" if t.content else "")
-            parts.append(f"  [{t.thread_type}] {t.title} (id:{t.id}){age_str}{snippet}")
+            parts.append(f"  [{t.thread_type}] {t.title} [id:{t.id}]{age_str}{snippet}")
 
     # Consume framing (when arbiter picked consume focus)
     consume_perception = next(

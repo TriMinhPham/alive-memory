@@ -154,7 +154,7 @@ async def manage_thread_lifecycle():
     - Dormant threads >7 days → archived
     """
     # Transition untouched threads to dormant
-    dormant_candidates = await db.get_dormant_threads(older_than_days=2)
+    dormant_candidates = await db.get_dormant_threads(older_than_hours=48)
     for thread in dormant_candidates:
         if thread.status in ('open', 'active'):
             await db.touch_thread(
@@ -171,8 +171,9 @@ async def manage_thread_lifecycle():
 
 async def cleanup_content_pool():
     """Clean up expired and excess pool items during sleep."""
+    from config.feeds import MAX_POOL_UNSEEN
     await db.expire_pool_items()
-    await db.cap_unseen_pool()
+    await db.cap_unseen_pool(max_unseen=MAX_POOL_UNSEEN)
 
 
 async def reset_drives_for_morning():

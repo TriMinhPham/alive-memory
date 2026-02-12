@@ -102,7 +102,20 @@ def _extract_keywords(text: str) -> set[str]:
 
 
 def _novelty_penalty(payload: Optional[dict], recent_keywords: list[str]) -> float:
-    """Reduce priority if topic overlaps heavily with recent focuses."""
+    """Check topic novelty against recent focuses.
+
+    Returns 0.3 penalty when keyword overlap exceeds the threshold.
+
+    Waterfall semantics: callers at higher-priority slots use this penalty to
+    skip the candidate, which naturally falls through to a lower-priority slot.
+    At the *lowest* slot for each channel type, the novelty gate is omitted so
+    that deprioritized candidates still get selected rather than eliminated.
+
+    Example: a repetitive thread is skipped at P2 (deadline) and falls to P5
+    (LRU thread). P5 does not check novelty — the thread was already
+    deprioritized by falling here. This implements the spec's "reduce by 0.3"
+    intent within a priority waterfall architecture.
+    """
     if not payload or not recent_keywords:
         return 0.0
 
@@ -239,14 +252,15 @@ async def decide_cycle_focus(drives: DrivesState, arbiter_state: dict) -> Arbite
                 'content': lru_thread.content or '',
                 'thread_type': lru_thread.thread_type,
             }
-            penalty = _novelty_penalty(payload,
-                                       arbiter_state.get('recent_focus_keywords', []))
-            if penalty < 0.3:
-                return ArbiterFocus(
-                    channel='thread',
-                    pipeline_mode=CHANNEL_TO_MODE['thread'],
-                    payload=payload,
-                )
+            # No novelty gate here — P5 is the last thread slot.
+            # If the thread was repetitive it was already skipped at P2 (deadline).
+            # Gating again here would eliminate it entirely, violating the spec's
+            # "reduce priority" intent. See _novelty_penalty docstring.
+            return ArbiterFocus(
+                channel='thread',
+                pipeline_mode=CHANNEL_TO_MODE['thread'],
+                payload=payload,
+            )
 
     # ── Priority 6: Unread news (lower salience) ──
     if (_check_daily_budget(arbiter_state, 'news')
