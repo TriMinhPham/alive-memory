@@ -11,6 +11,7 @@ from typing import Optional
 
 from db import JST
 from models.state import DrivesState
+import db
 
 
 @dataclass
@@ -149,7 +150,30 @@ async def decide_cycle_focus(drives: DrivesState, arbiter_state: dict) -> Arbite
         return ArbiterFocus(channel='rest', pipeline_mode='rest')
 
     # ── Priority 2: Active thread with deadline today ──
-    # (Stub — Phase 2 will add thread queries)
+    today_jst = datetime.now(JST).date().isoformat()
+    if (_check_daily_budget(arbiter_state, 'thread')
+            and _cooldown_elapsed(arbiter_state.get('last_thread_focus_ts'),
+                                  CHANNEL_COOLDOWNS['thread'],
+                                  drives.mood_arousal)):
+        active_threads = await db.get_active_threads(limit=5)
+        deadline_thread = next(
+            (t for t in active_threads if t.target_date == today_jst), None
+        )
+        if deadline_thread:
+            payload = {
+                'thread_id': deadline_thread.id,
+                'title': deadline_thread.title,
+                'content': deadline_thread.content or '',
+                'thread_type': deadline_thread.thread_type,
+            }
+            penalty = _novelty_penalty(payload,
+                                       arbiter_state.get('recent_focus_keywords', []))
+            if penalty < 0.3:  # not too repetitive
+                return ArbiterFocus(
+                    channel='thread',
+                    pipeline_mode=CHANNEL_TO_MODE['thread'],
+                    payload=payload,
+                )
 
     # ── Priority 3: Unread high-salience news ──
     # (Stub — Phase 5 will add news queries)
@@ -158,7 +182,28 @@ async def decide_cycle_focus(drives: DrivesState, arbiter_state: dict) -> Arbite
     # (Stub — Phase 4 will add consume selection)
 
     # ── Priority 5: Active thread (LRU, cooldown elapsed) ──
-    # (Stub — Phase 2 will add thread queries)
+    if (_check_daily_budget(arbiter_state, 'thread')
+            and _cooldown_elapsed(arbiter_state.get('last_thread_focus_ts'),
+                                  CHANNEL_COOLDOWNS['thread'],
+                                  drives.mood_arousal)):
+        active_threads = await db.get_active_threads(limit=3)
+        if active_threads:
+            # Pick the least-recently-touched thread
+            lru_thread = min(active_threads, key=lambda t: t.last_touched or t.created_at)
+            payload = {
+                'thread_id': lru_thread.id,
+                'title': lru_thread.title,
+                'content': lru_thread.content or '',
+                'thread_type': lru_thread.thread_type,
+            }
+            penalty = _novelty_penalty(payload,
+                                       arbiter_state.get('recent_focus_keywords', []))
+            if penalty < 0.3:
+                return ArbiterFocus(
+                    channel='thread',
+                    pipeline_mode=CHANNEL_TO_MODE['thread'],
+                    payload=payload,
+                )
 
     # ── Priority 6: Unread news (lower salience) ──
     # (Stub — Phase 5 will add news queries)

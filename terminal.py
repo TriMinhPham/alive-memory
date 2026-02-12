@@ -150,7 +150,7 @@ def show_banner():
 
 JST = timezone(timedelta(hours=9))
 
-PEEK_COMMANDS = ('journal', 'drives', 'collection', 'backroom', 'status', 'totems', 'events')
+PEEK_COMMANDS = ('journal', 'drives', 'collection', 'backroom', 'status', 'totems', 'events', 'threads', 'weather')
 
 
 def _fmt_time(dt) -> str:
@@ -208,6 +208,10 @@ async def handle_peek(cmd: str) -> bool:
         await _peek_totems()
     elif cmd == 'events':
         await _peek_events()
+    elif cmd == 'threads':
+        await _peek_threads()
+    elif cmd == 'weather':
+        await _peek_weather()
     else:
         return False
     return True
@@ -355,6 +359,63 @@ async def _peek_events():
                 payload_preview = f" \"{e.payload['title'][:40]}\""
         print(f"  {Fore.CYAN}{time}{Style.RESET_ALL} {e.event_type:<24} "
               f"{Fore.WHITE}{source_short}{Style.RESET_ALL}{payload_preview}")
+    print()
+
+
+async def _peek_threads():
+    active = await db.get_active_threads(limit=10)
+    counts = await db.get_thread_count_by_status()
+
+    total = sum(counts.values())
+    if total == 0:
+        print(f"\n  {Fore.WHITE}(No threads yet.){Style.RESET_ALL}\n")
+        return
+
+    print()
+    print(f"  {Fore.YELLOW}── Threads ──{Style.RESET_ALL}")
+    status_parts = [f"{k}: {v}" for k, v in sorted(counts.items()) if v > 0]
+    print(f"  {Fore.CYAN}{' | '.join(status_parts)}{Style.RESET_ALL}")
+
+    if active:
+        print()
+        for t in active:
+            age = ""
+            if t.created_at:
+                age_days = (datetime.now(timezone.utc) - t.created_at).days
+                age = f" ({age_days}d)" if age_days > 0 else " (new)"
+            touches = f" ×{t.touch_count}" if t.touch_count > 0 else ""
+            snippet = ""
+            if t.content:
+                s = t.content[:60]
+                if len(t.content) > 60:
+                    s += '...'
+                snippet = f"\n       {Fore.CYAN}{s}{Style.RESET_ALL}"
+            print(f"  {Fore.WHITE}[{t.thread_type}] {t.title}{age}{touches}{Style.RESET_ALL}{snippet}")
+    print()
+
+
+async def _peek_weather():
+    """Show most recent ambient weather event."""
+    events = await db.get_recent_events(limit=50)
+    weather_event = next(
+        (e for e in events if e.event_type == 'ambient_weather'), None
+    )
+
+    if not weather_event:
+        print(f"\n  {Fore.WHITE}(No weather data yet.){Style.RESET_ALL}\n")
+        return
+
+    p = weather_event.payload
+    print()
+    print(f"  {Fore.YELLOW}── Weather ──{Style.RESET_ALL}")
+    print(f"  condition  {p.get('condition', '?')}")
+    print(f"  temp       {p.get('temp_c', '?')}°C")
+    print(f"  season     {p.get('season', '?')}")
+    if p.get('diegetic_text'):
+        print(f"  feeling    {Fore.CYAN}{p['diegetic_text']}{Style.RESET_ALL}")
+    if p.get('season_text'):
+        print(f"  seasonal   {Fore.CYAN}{p['season_text']}{Style.RESET_ALL}")
+    print(f"  fetched    {_fmt_time(weather_event.ts)}")
     print()
 
 
