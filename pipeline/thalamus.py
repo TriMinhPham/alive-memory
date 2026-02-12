@@ -53,7 +53,7 @@ async def route(
     token_budget = await get_token_budget(focus.salience, drives)
 
     # Determine memory requests
-    memory_requests = build_memory_requests(focus, visitor, drives, token_budget)
+    memory_requests = build_memory_requests(focus, visitor, drives, token_budget, cycle_type)
 
     return RoutingDecision(
         cycle_type=cycle_type,
@@ -91,6 +91,15 @@ async def autonomous_routing(drives: DrivesState) -> RoutingDecision:
             'priority': 3,
         })
 
+    # Day context for idle/express (what's on her mind today)
+    if cycle_type in ('idle', 'express'):
+        memory_requests.append({
+            'type': 'day_context',
+            'max_items': 3,
+            'min_salience': 0.5,
+            'priority': 3,
+        })
+
     return RoutingDecision(
         cycle_type=cycle_type,
         focus=focus,
@@ -123,6 +132,7 @@ def build_memory_requests(
     visitor: Visitor,
     drives: DrivesState,
     budget: int,
+    cycle_type: str = 'idle',
 ) -> list[dict]:
     """Decide what memories to retrieve. Deterministic."""
 
@@ -177,6 +187,23 @@ def build_memory_requests(
             'type': 'recent_journal',
             'max_items': 1,
             'priority': 5,
+        })
+
+    # Day context: what happened earlier today
+    if cycle_type == 'engage' and visitor:
+        requests.append({
+            'type': 'day_context',
+            'visitor_id': visitor.id,
+            'max_items': 3,
+            'min_salience': 0.3,
+            'priority': 2,
+        })
+    if cycle_type in ('idle', 'express'):
+        requests.append({
+            'type': 'day_context',
+            'max_items': 3,
+            'min_salience': 0.5,
+            'priority': 3,
         })
 
     # Cap total requests
