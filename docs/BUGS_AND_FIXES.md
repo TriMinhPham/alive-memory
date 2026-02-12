@@ -6,6 +6,323 @@
 
 ---
 
+### BUG-2026-02-12-thread-update-empty-string-swallowed
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Medium |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** If the LLM output `"content": ""` to clear a thread's content, the empty string was silently swallowed and the old content persisted.
+
+**Root Cause:** The `or` fallback pattern (`content.get('content') or content.get('new_content')`) treats empty string as falsy, falling through to the legacy field name or `None`. Meanwhile, `db.touch_thread()` explicitly checks `if content is not None`, so `""` is a valid "clear this field" value.
+
+**Fix:** Switched from `or` fallback to key-presence checks: `content.get('content') if 'content' in content else content.get('new_content')`. This preserves empty strings while still falling through to legacy field names when the key is absent.
+
+**Files Affected:**
+- `pipeline/hippocampus_write.py` — key-presence checks for reason, content, status fields
+
+**Tests Added:**
+- [ ] Unit test: `{"content": ""}` clears thread content
+- [ ] Unit test: absent key falls through to legacy field name
+
+**Follow-ups / Notes:**
+- Found by Codex review (suggestion). Also applies to `reason` and `status` fields.
+
+---
+
+### BUG-2026-02-12-event-outcome-vocabulary-mismatch
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Medium |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** Executor wrote pool status names (`accepted`, `reflected`) to `events.outcome`, but the model and spec define event outcomes as `engaged | ignored | expired`. The two vocabularies were conflated.
+
+**Root Cause:** When implementing pool↔event coupling (Fix #4), the `outcome` variable (pool status) was passed directly to `update_event_outcome()` instead of using the spec's event outcome vocabulary.
+
+**Fix:** Always write `'engaged'` to `events.outcome` — the spec value for "this perception event was acted upon". Pool-level detail (`accepted`/`reflected`) is already captured in `content_pool.status`. Also clarified the `models/event.py` outcome comment.
+
+**Files Affected:**
+- `pipeline/executor.py` — write `'engaged'` instead of pool status to event outcome
+- `models/event.py` — clarified outcome comment to reference content_pool.status
+
+**Tests Added:**
+- [ ] Unit test: event outcome is always 'engaged', never 'accepted'/'reflected'
+
+**Follow-ups / Notes:**
+- Found by manual diff review after Codex review fixes.
+
+---
+
+### BUG-2026-02-12-migration-runner-drops-ddl
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Critical |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** Migration SQL files starting with a `-- comment` line had their first `CREATE TABLE` statement silently dropped, leaving tables uncreated.
+
+**Root Cause:** `sql.split(';')` produces segments like `"-- comment\nCREATE TABLE..."`. After `.strip()`, the segment starts with `--`, so `startswith('--')` skipped the entire segment — including the DDL below the comment.
+
+**Fix:** Strip comment-only lines from each segment before checking emptiness. Each line starting with `--` is removed, then the remaining text is checked. This preserves inline comments while correctly executing multi-line segments that have leading comments.
+
+**Files Affected:**
+- `db.py` — rewrote migration statement parsing to strip comment lines per-segment
+
+**Tests Added:**
+- [ ] Unit test: migration file with leading comment executes CREATE TABLE
+- [ ] Regression test: pure comment-only segments are still skipped
+
+**Follow-ups / Notes:**
+- Found by Codex review (P0). All 3 migration files (001, 003, 004) start with comments and were affected.
+
+---
+
+### BUG-2026-02-12-creative-cooldown-kills-thread-focus
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | High |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** Arbiter thread focus cycles were silently downgraded from `express` to `idle`, preventing the shopkeeper from ever working on her threads during creative cooldown.
+
+**Root Cause:** Arbiter sets `routing.cycle_type = 'express'` for thread focus. The creative cooldown gate then unconditionally overrides express→idle. Thread focus was killed every time creative cooldown was active.
+
+**Fix:** Added `and not focus_context` guard to the creative cooldown gate, so arbiter-directed express cycles are preserved.
+
+**Files Affected:**
+- `heartbeat.py` — added focus_context exception to creative cooldown gate
+
+**Tests Added:**
+- [ ] Unit test: thread focus express survives creative cooldown
+- [ ] Regression test: non-arbiter express still blocked by cooldown
+
+**Follow-ups / Notes:**
+- Found by Codex review (P1).
+
+---
+
+### BUG-2026-02-12-sleep-thread-lifecycle-crash
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | High |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** Sleep cycle crashed with `TypeError` when trying to manage thread lifecycle, preventing thread dormancy transitions.
+
+**Root Cause:** Caller used `older_than_days=2` but `db.get_dormant_threads()` signature expects `older_than_hours: int = 48`. Python raised TypeError on the unexpected keyword argument.
+
+**Fix:** Changed to `older_than_hours=48` to match the function signature.
+
+**Files Affected:**
+- `sleep.py` — fixed kwarg name in `manage_thread_lifecycle()`
+
+**Tests Added:**
+- [ ] Unit test: `manage_thread_lifecycle()` runs without TypeError
+- [ ] Regression test: dormant threads are correctly identified
+
+**Follow-ups / Notes:**
+- Found by Codex review (P1). Would have crashed on every sleep cycle.
+
+---
+
+### BUG-2026-02-12-pool-event-outcome-coupling
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | High |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** When the shopkeeper consumed content and added it to her collection or reflected on it, the content_pool status was updated but the linked event's `outcome` and `engaged_at` fields were never set.
+
+**Root Cause:** Executor updated `content_pool.status` but had no code to propagate the outcome back to the source event via `events.outcome` / `events.engaged_at`.
+
+**Fix:** Added `db.update_event_outcome()` function. Executor now sets `engaged_at=now` on pool updates and looks up the pool item's `source_event_id` to also update the linked event.
+
+**Files Affected:**
+- `db.py` — added `update_event_outcome()` function
+- `pipeline/executor.py` — added engaged_at to pool updates, added event outcome coupling
+
+**Tests Added:**
+- [ ] Unit test: pool acceptance propagates outcome to source event
+- [ ] Regression test: pool items without source_event_id don't crash
+
+**Follow-ups / Notes:**
+- Found by Codex review (P1). Spec §3.4 requires both sides to be updated together.
+
+---
+
+### BUG-2026-02-12-thread-id-format-parens
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Medium |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** Thread IDs in the THINGS ON MY MIND section used parentheses `(id:X)` instead of brackets `[id:X]`, reducing LLM round-trip parsing reliability.
+
+**Root Cause:** Format string used parentheses. Spec requires square brackets for reliable parsing.
+
+**Fix:** Changed `(id:{t.id})` to `[id:{t.id}]` in the cortex prompt builder.
+
+**Files Affected:**
+- `pipeline/cortex.py` — fixed thread ID format string
+
+**Tests Added:**
+- [ ] Unit test: thread context uses bracket format
+
+**Follow-ups / Notes:**
+- Found by Codex review (P2).
+
+---
+
+### BUG-2026-02-12-thread-update-field-mismatch
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Medium |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** Thread updates from Cortex were silently lost — the LLM emitted `content` + `reason` + `status` fields but the handler read `new_content` + `touch_reason` + `new_status`.
+
+**Root Cause:** Schema mismatch between Cortex output (which uses `content`, `reason`, `status`) and hippocampus_write handler (which expected `new_content`, `touch_reason`, `new_status`).
+
+**Fix:** Added fallback reads: `content.get('reason') or content.get('touch_reason', ...)` etc., so both field naming conventions work.
+
+**Files Affected:**
+- `pipeline/hippocampus_write.py` — added fallback field reads in thread_update handler
+
+**Tests Added:**
+- [ ] Unit test: thread_update with `reason` field works
+- [ ] Unit test: thread_update with `touch_reason` field works (backward compat)
+
+**Follow-ups / Notes:**
+- Found by Codex review (P2). Silent data loss — no error raised, fields just came through as None.
+
+---
+
+### BUG-2026-02-12-novelty-penalty-hard-gate
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Medium |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** Spec says novelty penalty should "reduce by 0.3" but implementation used a hard gate at all priority slots, including the final slot for each channel. At the last slot (e.g. P5 LRU thread), the hard gate eliminated the candidate entirely instead of deprioritizing it.
+
+**Root Cause:** All 3 novelty penalty call sites used `if penalty < 0.3: return focus`, which was correct for higher-priority slots (candidate falls through to a lower slot) but wrong for the final slot (candidate is eliminated with no fallback).
+
+**Fix:** Removed the novelty gate at P5 (LRU thread) — the last thread slot. P6 (low-salience news) already had no gate. Updated `_novelty_penalty` docstring to explain waterfall semantics: higher slots gate to skip/deprioritize, final slots omit the gate so candidates are still selected.
+
+**Files Affected:**
+- `pipeline/arbiter.py` — removed novelty gate at P5 LRU thread, updated docstring
+
+**Tests Added:**
+- [ ] Unit test: repetitive thread still selected at P5 when P2 skips it
+
+**Follow-ups / Notes:**
+- Found by Codex review (P2). Initial fix was docstring-only; updated to behavioral fix after manual review.
+
+---
+
+### BUG-2026-02-12-missing-requirements-txt
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Medium |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** No dependency declaration file existed, forcing manual discovery of required packages.
+
+**Root Cause:** `requirements.txt` was never created during initial development.
+
+**Fix:** Created `requirements.txt` with runtime deps: `aiosqlite`, `anthropic` (required), `aiohttp`, `feedparser`, `colorama` (optional, with comments explaining graceful degradation).
+
+**Files Affected:**
+- `requirements.txt` — new file
+
+**Tests Added:**
+- [ ] N/A (config file)
+
+**Follow-ups / Notes:**
+- Found by Codex review (P2). Optional deps are imported inside functions with try/except.
+
+---
+
+### BUG-2026-02-12-max-pool-unseen-not-wired
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-12 |
+| **Severity**    | Low |
+| **Status**      | Fixed |
+| **Branch**      | `fix/codex-review-living-loop` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** `MAX_POOL_UNSEEN` config value (50) defined in `config/feeds.py` but never used — `cap_unseen_pool()` was called with its default (also 50).
+
+**Root Cause:** Config import was missing at both call sites.
+
+**Fix:** Imported `MAX_POOL_UNSEEN` from `config.feeds` and passed it to `cap_unseen_pool()` in both `heartbeat.py` and `sleep.py`.
+
+**Files Affected:**
+- `heartbeat.py` — import and pass MAX_POOL_UNSEEN
+- `sleep.py` — import and pass MAX_POOL_UNSEEN
+
+**Tests Added:**
+- [ ] Unit test: changing MAX_POOL_UNSEEN config affects cap behavior
+
+**Follow-ups / Notes:**
+- Found by Codex review (P3). Currently no-op since default matches config, but wiring prevents silent divergence if config changes.
+
+---
+
 ### BUG-2026-02-12-canonical-identity-contradiction
 
 | Field           | Value |

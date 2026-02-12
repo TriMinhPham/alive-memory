@@ -129,9 +129,9 @@ async def hippocampus_consolidate(update: dict, visitor_id: str = None):
         if thread:
             await db.touch_thread(
                 thread.id,
-                reason=content.get('touch_reason', 'thought about it'),
-                content=content.get('new_content'),
-                status=content.get('new_status'),
+                reason=content.get('reason') if 'reason' in content else content.get('touch_reason', 'thought about it'),
+                content=content.get('content') if 'content' in content else content.get('new_content'),
+                status=content.get('status') if 'status' in content else content.get('new_status'),
             )
         else:
             print(f"  [Memory] Skipped thread_update — no unique thread match "

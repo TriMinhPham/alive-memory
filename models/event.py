@@ -17,7 +17,7 @@ class Event:
     salience_dynamic: float = 0.0
     ttl_hours: Optional[float] = None   # NULL = no expiry
     engaged_at: Optional[datetime] = None
-    outcome: Optional[str] = None       # engaged | ignored | expired
+    outcome: Optional[str] = None       # engaged | ignored | expired (pool-level detail in content_pool.status)
 
     @property
     def effective_salience(self) -> float:
