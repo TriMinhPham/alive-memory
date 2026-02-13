@@ -27,9 +27,7 @@ echo "[deploy] Installing Python dependencies..."
 echo "[deploy] Building frontend..."
 cd window
 npm ci --silent
-NEXT_PUBLIC_API_URL='' \
-NEXT_PUBLIC_WS_URL="wss://${DOMAIN}/ws/" \
-NEXT_PUBLIC_ASSET_URL='/assets' \
+NEXT_PUBLIC_SITE_URL="https://${DOMAIN}" \
 npm run build
 cd ..
 
@@ -37,19 +35,21 @@ cd ..
 echo "[deploy] Restarting shopkeeper service..."
 sudo systemctl restart shopkeeper
 
-# ─── Health check ───
+# ─── Health check (retry up to 5 times) ───
 echo "[deploy] Waiting for service to start..."
-sleep 3
-
 HEALTH_URL="http://127.0.0.1:8080/api/health"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" || echo "000")
+MAX_RETRIES=5
+for i in $(seq 1 ${MAX_RETRIES}); do
+    sleep 3
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" || echo "000")
+    if [ "${HTTP_CODE}" = "200" ]; then
+        echo "[deploy] Health check passed (HTTP ${HTTP_CODE}) on attempt ${i}"
+        echo "[deploy] Deployment complete at $(date -Iseconds)"
+        exit 0
+    fi
+    echo "[deploy] Health check attempt ${i}/${MAX_RETRIES}: HTTP ${HTTP_CODE}"
+done
 
-if [ "${HTTP_CODE}" = "200" ]; then
-    echo "[deploy] Health check passed (HTTP ${HTTP_CODE})"
-else
-    echo "[deploy] WARNING: Health check returned HTTP ${HTTP_CODE}"
-    echo "[deploy] Check logs: journalctl -u shopkeeper -n 50"
-    exit 1
-fi
-
-echo "[deploy] Deployment complete at $(date -Iseconds)"
+echo "[deploy] ERROR: Health check failed after ${MAX_RETRIES} attempts"
+echo "[deploy] Check logs: journalctl -u shopkeeper -n 50"
+exit 1
