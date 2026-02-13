@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { dashboardApi } from '@/lib/dashboard-api';
 import VitalsPanel from '@/components/dashboard/VitalsPanel';
 import DrivesPanel from '@/components/dashboard/DrivesPanel';
 import CostsPanel from '@/components/dashboard/CostsPanel';
@@ -31,13 +32,7 @@ export default function DashboardPage() {
     setLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8080/api/dashboard/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-
-      const data = await res.json();
+      const data = await dashboardApi.auth(password);
 
       if (data.authenticated) {
         sessionStorage.setItem('dashboard_password', password);
