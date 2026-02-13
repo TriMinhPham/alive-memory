@@ -24,6 +24,7 @@ const MAX_TEXT_ENTRIES = 8;
 
 export function useShopkeeperSocket(): ShopkeeperState & {
   sendChat: (text: string, token: string) => void;
+  sendDisconnect: (token: string) => void;
 } {
   const [layers, setLayers] = useState<SceneLayers | null>(null);
   const [textEntries, setTextEntries] = useState<TextEntry[]>([]);
@@ -138,6 +139,14 @@ export function useShopkeeperSocket(): ShopkeeperState & {
     }
   }, []);
 
+  const sendDisconnect = useCallback((token: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({ type: 'visitor_disconnect', token }),
+      );
+    }
+  }, []);
+
   useEffect(() => {
     disposedRef.current = false;
     connect();
@@ -156,5 +165,6 @@ export function useShopkeeperSocket(): ShopkeeperState & {
     activityLabel,
     connected,
     sendChat,
+    sendDisconnect,
   };
 }

@@ -20,6 +20,7 @@ export default function WindowPage() {
     activityLabel,
     connected,
     sendChat,
+    sendDisconnect,
   } = useShopkeeperSocket();
 
   const { activeLayers, prevLayers, opacity } = useSceneTransition(layers);
@@ -39,8 +40,9 @@ export default function WindowPage() {
   }, []);
 
   const handleChatClose = useCallback(() => {
+    if (chatToken) sendDisconnect(chatToken);
     setChatOpen(false);
-  }, []);
+  }, [chatToken, sendDisconnect]);
 
   const weather = activeLayers?.weather ?? '';
 

@@ -6,6 +6,43 @@
 
 ---
 
+### BUG-2026-02-13-chat-farewell-fake-message
+
+| Field           | Value |
+|-----------------|-------|
+| **Date**        | 2026-02-13 |
+| **Severity**    | High |
+| **Status**      | Fixed |
+| **Branch**      | `fix/chat-farewell-bug` |
+| **PR**          | N/A |
+| **Commit**      | N/A |
+
+**Symptom:** When user clicks "Leave" in the chat panel, "Thank you for visiting." appears in the text stream as if the visitor said it. The user never typed this message — the app put words in their mouth.
+
+**Root Cause:** `ChatPanel.tsx` `handleClose` callback called `sendChat('Thank you for visiting.', token)` which sent a `visitor_message` WebSocket event with canned text. The server broadcast this as `visitor_speech` to all window viewers, making it look like genuine visitor dialogue.
+
+**Fix:** Three changes:
+1. Removed the fake `sendChat()` call from `ChatPanel.handleClose` — Leave button now just calls `onClose()`.
+2. Added `sendDisconnect(token)` to the WebSocket hook (`useShopkeeperSocket`) which sends `{ type: 'visitor_disconnect', token }`.
+3. Added `_handle_ws_disconnect()` to `heartbeat_server.py` WebSocket handler — validates token, creates `visitor_disconnect` event, clears engagement state, triggers microcycle so the shopkeeper notices the departure through her perception pipeline.
+
+**Files Affected:**
+- `window/src/components/ChatPanel.tsx` — removed `sendChat` call from `handleClose`
+- `window/src/hooks/useShopkeeperSocket.ts` — added `sendDisconnect` function
+- `window/src/app/page.tsx` — wired `sendDisconnect` through `handleChatClose`
+- `window/src/lib/types.ts` — added `VisitorDisconnect` type
+- `heartbeat_server.py` — added `visitor_disconnect` message handling in WS path
+
+**Tests Added:**
+- [ ] Manual test: click Leave, no fake "Thank you for visiting." message appears
+- [ ] Manual test: shopkeeper perceives visitor departure after Leave
+
+**Follow-ups / Notes:**
+- The TCP terminal handler already had full `visitor_disconnect` support. The WebSocket handler was missing it entirely — window visitors just silently vanished when they left.
+- Server now properly routes disconnects through the pipeline (`on_visitor_disconnect` → sensorium perception → thalamus routing → hypothalamus drive shifts).
+
+---
+
 ### BUG-2026-02-12-sim-db-filename-collision
 
 | Field           | Value |

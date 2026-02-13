@@ -3,9 +3,9 @@
 import { useCallback, useRef, useState } from 'react';
 
 interface ChatPanelProps {
-  token: string;
-  sendChat: (text: string, token: string) => void;
   onClose: () => void;
+  sendChat: (text: string, token: string) => void;
+  token: string;
 }
 
 /**
@@ -38,9 +38,8 @@ export default function ChatPanel({
   );
 
   const handleClose = useCallback(() => {
-    sendChat('Thank you for visiting.', token);
     onClose();
-  }, [token, sendChat, onClose]);
+  }, [onClose]);
 
   return (
     <div className="chat-panel">
