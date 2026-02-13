@@ -120,9 +120,7 @@ cd "${APP_DIR}/window"
 sudo -u "${DEPLOY_USER}" npm ci --silent
 sudo -u "${DEPLOY_USER}" bash -c "
     cd ${APP_DIR}/window
-    NEXT_PUBLIC_API_URL='' \
-    NEXT_PUBLIC_WS_URL='wss://${DOMAIN}/ws/' \
-    NEXT_PUBLIC_ASSET_URL='/assets' \
+    NEXT_PUBLIC_SITE_URL='https://${DOMAIN}' \
     npm run build
 "
 echo "  Frontend built → window/out/"
@@ -184,6 +182,32 @@ SUDOERS
 chmod 440 /etc/sudoers.d/shopkeeper
 echo "  Sudoers configured for service management."
 
+# SSH key for GitHub Actions CI (inbound deploy)
+CI_KEY="/home/${DEPLOY_USER}/.ssh/id_ed25519_ci"
+if [ ! -f "${CI_KEY}" ]; then
+    ssh-keygen -t ed25519 -f "${CI_KEY}" -N "" -C "shopkeeper-ci@$(hostname)"
+    chown "${DEPLOY_USER}:${DEPLOY_USER}" "${CI_KEY}" "${CI_KEY}.pub"
+    chmod 600 "${CI_KEY}"
+
+    # Add the CI public key to authorized_keys so GitHub Actions can SSH in
+    cat "${CI_KEY}.pub" >> "/home/${DEPLOY_USER}/.ssh/authorized_keys"
+    chown "${DEPLOY_USER}:${DEPLOY_USER}" "/home/${DEPLOY_USER}/.ssh/authorized_keys"
+    chmod 600 "/home/${DEPLOY_USER}/.ssh/authorized_keys"
+
+    echo ""
+    echo "  ┌─────────────────────────────────────────────────────┐"
+    echo "  │  CI PRIVATE KEY — Add as GitHub Actions secret      │"
+    echo "  │  Repo → Settings → Secrets → VPS_SSH_KEY            │"
+    echo "  │  Copy the ENTIRE key below (including BEGIN/END):   │"
+    echo "  └─────────────────────────────────────────────────────┘"
+    echo ""
+    cat "${CI_KEY}"
+    echo ""
+    read -rp "  Press ENTER after saving the key as a GitHub secret... "
+else
+    echo "  CI SSH key already exists."
+fi
+
 # Firewall
 ufw allow OpenSSH
 ufw allow 'Nginx Full'
@@ -212,7 +236,7 @@ echo "  1. Verify: curl https://${DOMAIN}/api/health"
 echo "  2. Generate invite tokens:"
 echo "     cd ${APP_DIR}"
 echo "     sudo -u ${DEPLOY_USER} .venv/bin/python generate_token.py --name 'Visitor' --uses 5"
-echo "  3. Set up GitHub Actions secrets:"
+echo "  3. Add GitHub Actions secret (if not done above):"
 echo "     VPS_HOST = $(curl -s ifconfig.me)"
-echo "     VPS_SSH_KEY = (SSH private key for the shopkeeper user)"
+echo "     VPS_SSH_KEY = (already printed above — saved?)"
 echo "══════════════════════════════════════"
