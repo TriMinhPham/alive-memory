@@ -106,6 +106,11 @@ export interface VisitorMessage {
   token: string;
 }
 
+export interface VisitorDisconnect {
+  type: 'visitor_disconnect';
+  token: string;
+}
+
 // ─── Aggregated client state ───
 
 export interface ShopkeeperState {
