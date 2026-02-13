@@ -15,6 +15,7 @@ from pipeline.sensorium import Perception
 from pipeline.hypothalamus import drives_to_feeling
 from config.identity import IDENTITY_COMPACT, VOICE_CHECKSUM
 import db
+import llm_logger
 
 CORTEX_MODEL = "claude-sonnet-4-5-20250929"
 API_CALL_TIMEOUT = 60.0  # Hard timeout per request (seconds)
@@ -303,6 +304,17 @@ async def cortex_call(
     _record_success()
     _increment_daily()
 
+    # Log LLM call for cost tracking
+    usage = response.usage
+    await llm_logger.log_llm_call(
+        provider='anthropic',
+        model=CORTEX_MODEL,
+        purpose='cortex',
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cycle_id=routing.cycle_id if hasattr(routing, 'cycle_id') else None,
+    )
+
     # Parse response
     text = response.content[0].text.strip()
     text = re.sub(r'^```(?:json)?\s*', '', text)
@@ -371,6 +383,16 @@ Return JSON: {{"journal": "your entry", "summary": {{"summary_bullets": ["..."],
 
     _record_success()
     _increment_daily()
+
+    # Log LLM call for cost tracking
+    usage = response.usage
+    await llm_logger.log_llm_call(
+        provider='anthropic',
+        model=CORTEX_MODEL,
+        purpose='cortex_maintenance',
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+    )
 
     text = response.content[0].text.strip()
     text = re.sub(r'^```(?:json)?\s*', '', text)

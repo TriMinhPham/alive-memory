@@ -16,6 +16,7 @@ from abc import ABC, abstractmethod
 
 import aiohttp
 import certifi
+import llm_logger
 
 
 # ─── Seedream image_size mapping ────────────────────────────────────────
@@ -260,4 +261,17 @@ async def generate_image(prompt: str, aspect: str = '3:2') -> bytes:
                       the response shape is unexpected, or image download fails.
     """
     adapter = _ensure_adapter()
-    return await adapter.generate(prompt, aspect)
+    image_bytes = await adapter.generate(prompt, aspect)
+
+    # Log image generation for cost tracking (best-effort, don't fail request)
+    try:
+        await llm_logger.log_llm_call(
+            provider='fal',
+            model=os.environ.get('FAL_IMAGE_MODEL', _SEEDREAM_MODEL),
+            purpose='image_gen',
+            images_generated=1,
+        )
+    except Exception as e:
+        print(f'[Warning] Image gen logging failed: {e}')
+
+    return image_bytes
