@@ -114,7 +114,9 @@ async def fetch_ambient_context(location: str = None) -> Optional[AmbientContext
     if clock.is_simulating():
         return _simulated_weather(clock.now())
 
+    import ssl
     import aiohttp
+    import certifi
 
     if location is None:
         from config.location import WTTR_LOCATION
@@ -123,7 +125,9 @@ async def fetch_ambient_context(location: str = None) -> Optional[AmbientContext
     url = f"https://wttr.in/{location}?format=j1"
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        conn = aiohttp.TCPConnector(ssl=ssl_ctx)
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20), connector=conn) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     logger.warning("wttr.in returned %d", resp.status)

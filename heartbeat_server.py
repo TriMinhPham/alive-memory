@@ -566,12 +566,15 @@ class ShopkeeperServer:
             state = await build_initial_state()
             await websocket.send(json.dumps(state))
 
-            # Listen for chat messages (if authenticated)
+            # Listen for chat messages and disconnect signals
             async for raw_message in websocket:
                 try:
                     data = json.loads(raw_message)
-                    if data.get('type') == 'visitor_message':
+                    msg_type = data.get('type')
+                    if msg_type == 'visitor_message':
                         await self._handle_ws_chat(data, websocket)
+                    elif msg_type == 'visitor_disconnect':
+                        await self._handle_ws_disconnect(data)
                 except (json.JSONDecodeError, KeyError):
                     pass
         except Exception as e:
@@ -623,6 +626,66 @@ class ShopkeeperServer:
 
         # Trigger a microcycle
         await self.heartbeat.schedule_microcycle()
+
+    async def _handle_ws_disconnect(self, data: dict):
+        """Handle a visitor disconnect from a WebSocket client."""
+        token = data.get('token', '')
+        if not token:
+            return
+
+        # Look up visitor identity from the token.
+        # Use raw DB query instead of validate_chat_token() because
+        # validate rejects uses_remaining<=0, but disconnect must work
+        # even after the last message consumed the final use.
+        # Still enforce expiry — expired tokens must not trigger disconnects.
+        conn = await db.get_db()
+        cursor = await conn.execute(
+            "SELECT display_name, expires_at FROM chat_tokens WHERE token = ?",
+            (token,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return
+
+        if row['expires_at']:
+            from datetime import datetime, timezone
+            expires = datetime.fromisoformat(row['expires_at'])
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if expires < datetime.now(timezone.utc):
+                return
+
+        display_name = row['display_name']
+        visitor_id = f'web_{display_name.lower().replace(" ", "_")}'
+
+        # Only process disconnect if THIS visitor owns the active session
+        engagement = await db.get_engagement_state()
+        if engagement.visitor_id != visitor_id:
+            if engagement.visitor_id:
+                print(f"  {Fore.GREEN}[Window]{Style.RESET_ALL} "
+                      f"Visitor {display_name} left (not the active visitor)")
+            return
+
+        print(f"  {Fore.GREEN}[Window]{Style.RESET_ALL} "
+              f"Visitor {display_name} left the shop")
+
+        # Create disconnect event for the pipeline
+        disconnect_event = Event(
+            event_type='visitor_disconnect',
+            source=f'visitor:{visitor_id}',
+            payload={},
+        )
+        await on_visitor_disconnect(disconnect_event)
+
+        # Trigger microcycle FIRST so the perception cycle sees
+        # the real engagement context (turn_count, visitor_id)
+        # before we clear it — matching the TCP handler order.
+        await self.heartbeat.schedule_microcycle()
+
+        # Clear engagement state AFTER scheduling the cycle
+        await db.update_engagement_state(
+            status='none', visitor_id=None, turn_count=0
+        )
 
     async def _broadcast_to_window(self, message: dict):
         """Broadcast a JSON message to all connected window viewers."""
