@@ -1,6 +1,5 @@
 'use client';
 
-import { dashboardApi } from '@/lib/dashboard-api';
 import { useState, useEffect } from 'react';
 
 interface Drives {
@@ -20,7 +19,8 @@ export default function DrivesPanel() {
 
   const fetchDrives = async () => {
     try {
-      const data = await dashboardApi.getDrives();
+      const res = await fetch('http://localhost:8080/api/dashboard/drives');
+      const data = await res.json();
       setDrives(data);
     } catch (err) {
       console.error('Failed to fetch drives:', err);

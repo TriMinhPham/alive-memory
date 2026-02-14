@@ -3,7 +3,9 @@
 const imageCache = new Map<string, HTMLImageElement>();
 const MAX_CACHE_SIZE = 200;
 
-const ASSET_BASE = process.env.NEXT_PUBLIC_ASSET_URL || '/assets';
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+const ASSET_BASE = process.env.NEXT_PUBLIC_ASSET_URL
+  || (API_BASE ? `${API_BASE}/assets` : '/assets');
 
 /** Sanitize a filename to prevent path traversal. */
 function sanitizeFilename(name: string): string {
@@ -35,6 +37,8 @@ export async function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => {
       // Don't reject — return a transparent placeholder
       console.warn(`[compositor] Failed to load: ${src}`);
+      // Cache failures too so we don't repeatedly request missing files.
+      imageCache.set(src, img);
       resolve(img); // img will be 0x0, drawing it is a no-op
     };
     img.src = src;

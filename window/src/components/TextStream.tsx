@@ -37,15 +37,16 @@ export default function TextStream({
   );
 }
 
-function TypewriterText({ text }: { text: string }) {
+function TypewriterText({ text }: { text: string | null | undefined }) {
+  const safeText = typeof text === 'string' ? text : '';
   const [displayed, setDisplayed] = useState('');
   const [done, setDone] = useState(false);
-  const textRef = useRef(text);
+  const textRef = useRef(safeText);
 
   useEffect(() => {
     // Reset if text changes
-    if (textRef.current !== text) {
-      textRef.current = text;
+    if (textRef.current !== safeText) {
+      textRef.current = safeText;
       setDisplayed('');
       setDone(false);
     }
@@ -53,17 +54,17 @@ function TypewriterText({ text }: { text: string }) {
     if (done) return;
 
     let i = displayed.length;
-    if (i >= text.length) {
+    if (i >= safeText.length) {
       setDone(true);
       return;
     }
 
     const timer = setTimeout(() => {
-      setDisplayed(text.slice(0, i + 1));
+      setDisplayed(safeText.slice(0, i + 1));
     }, 30);
 
     return () => clearTimeout(timer);
-  }, [text, displayed, done]);
+  }, [safeText, displayed, done]);
 
   return <span>{displayed}{!done && <span className="typewriter-cursor">|</span>}</span>;
 }

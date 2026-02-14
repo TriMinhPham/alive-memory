@@ -20,6 +20,8 @@ export default function StatePanel({ state, activityLabel }: StatePanelProps) {
     );
   }
 
+  const threads = Array.isArray(state.threads) ? state.threads : [];
+
   return (
     <aside className="state-panel">
       {/* Weather as diegetic description */}
@@ -44,11 +46,11 @@ export default function StatePanel({ state, activityLabel }: StatePanelProps) {
       </section>
 
       {/* Active threads as a quiet list */}
-      {state.threads.length > 0 && (
+      {threads.length > 0 && (
         <section className="state-panel__section">
           <h3 className="state-panel__heading">Threads</h3>
           <ul className="state-panel__threads">
-            {state.threads.map((thread) => (
+            {threads.map((thread) => (
               <li key={thread.id} className="state-panel__thread">
                 <span className="state-panel__thread-title">{thread.title}</span>
                 <span className="state-panel__thread-status">{thread.status}</span>
