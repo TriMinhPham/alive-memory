@@ -127,11 +127,6 @@ async def process_output(body_output: BodyOutput, validated: ValidatedOutput,
         engagement = await db.get_engagement_state()
         now = clock.now_utc()
         if engagement.status != 'engaged' or engagement.visitor_id != visitor_id:
-            # Switching to a new visitor — update previous visitor's presence
-            if engagement.status == 'engaged' and engagement.visitor_id and engagement.visitor_id != visitor_id:
-                await db.update_visitor_present(
-                    engagement.visitor_id, status='waiting',
-                )
             # First speak to this visitor — begin engagement
             await db.update_engagement_state(
                 status='engaged',
@@ -140,18 +135,11 @@ async def process_output(body_output: BodyOutput, validated: ValidatedOutput,
                 last_activity=now,
                 turn_count=1,
             )
-            # Mark this visitor as in_conversation
-            await db.update_visitor_present(
-                visitor_id, status='in_conversation', last_activity=now,
-            )
         else:
             # Continuing conversation — update activity and increment turn
             await db.update_engagement_state(
                 last_activity=now,
                 turn_count=engagement.turn_count + 1,
-            )
-            await db.update_visitor_present(
-                visitor_id, last_activity=now,
             )
 
     # ── Drive adjustments from action outcomes (Phase 2) ──
@@ -291,24 +279,16 @@ def _detect_positive_signal(action_result) -> bool:
     return False
 
 
-def _extract_pattern(decision: ActionDecision, context: dict) -> str:
-    """Extract coarse-grained context pattern for inhibition matching.
+def _build_inhibition_pattern(decision: ActionDecision) -> str:
+    """Build coarse-grained context pattern for inhibition matching.
 
-    Deliberately broad so inhibitions generalize.
+    Deliberately broad so inhibitions generalize. Only includes fields
+    we can reliably determine from the action itself — mode is not
+    available here (would require heartbeat context), so we omit it
+    to ensure patterns match in _matches_pattern().
     """
     return json.dumps({
-        'mode': context.get('mode', 'unknown'),
-        'visitor_present': context.get('visitor_present', False),
-    })
-
-
-def _extract_inhibition_seed(decision: ActionDecision, context: dict) -> str:
-    """Structured seed for inhibition reason. Cortex narrates this naturally."""
-    return json.dumps({
-        'action': decision.action,
-        'target': decision.target,
-        'context_mode': context.get('mode'),
-        'trigger': 'self_assessment',
+        'visitor_present': decision.target == 'visitor',
     })
 
 
@@ -338,10 +318,7 @@ async def _update_inhibitions(motor_plan: MotorPlan, body_output: BodyOutput,
 async def _maybe_form_inhibition(decision: ActionDecision,
                                  negative: bool, positive: bool) -> None:
     """Form, strengthen, or weaken inhibitions based on signals."""
-    pattern_json = json.dumps({
-        'mode': 'unknown',
-        'visitor_present': decision.target == 'visitor',
-    })
+    pattern_json = _build_inhibition_pattern(decision)
 
     if negative:
         existing = await db.find_matching_inhibition(decision.action, pattern_json)
@@ -353,14 +330,15 @@ async def _maybe_form_inhibition(decision: ActionDecision,
                 trigger_count=existing['trigger_count'] + 1,
             )
         else:
+            reason_seed = json.dumps({
+                'action': decision.action,
+                'target': decision.target,
+                'trigger': 'self_assessment',
+            })
             await db.create_inhibition(
                 action=decision.action,
                 pattern=pattern_json,
-                reason=json.dumps({
-                    'action': decision.action,
-                    'target': decision.target,
-                    'trigger': 'self_assessment',
-                }),
+                reason=reason_seed,
                 strength=0.3,
             )
 
