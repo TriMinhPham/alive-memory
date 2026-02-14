@@ -1,6 +1,5 @@
 'use client';
 
-import { dashboardApi } from '@/lib/dashboard-api';
 import { useState, useEffect } from 'react';
 
 interface CollectionItem {
@@ -19,7 +18,8 @@ export default function CollectionPanel() {
 
   const fetchCollection = async () => {
     try {
-      const data = await dashboardApi.getCollection();
+      const res = await fetch('http://localhost:8080/api/dashboard/collection');
+      const data = await res.json();
       setItems(data.collection || []);
     } catch (err) {
       console.error('Failed to fetch collection:', err);

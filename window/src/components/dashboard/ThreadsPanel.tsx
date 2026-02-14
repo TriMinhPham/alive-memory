@@ -1,24 +1,37 @@
 'use client';
 
-import { dashboardApi } from '@/lib/dashboard-api';
 import { useState, useEffect } from 'react';
 
-interface Thread {
+interface ThreadInfo {
   id: string;
-  mode: string;
-  dialogue: string;
-  internal_monologue: string;
-  ts: string;
+  title: string;
+  status: string;
 }
 
+const STATUS_COLORS: Record<string, string> = {
+  active: 'border-green-500',
+  open: 'border-blue-500',
+  dormant: 'border-neutral-600',
+  closed: 'border-neutral-700',
+};
+
 export default function ThreadsPanel() {
-  const [threads, setThreads] = useState<Thread[]>([]);
+  const [threads, setThreads] = useState<ThreadInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchThreads = async () => {
     try {
-      const data = await dashboardApi.getThreads();
-      setThreads(data.threads || []);
+      const res = await fetch('http://localhost:8080/api/dashboard/threads');
+      const data = await res.json();
+      // Support both old format (cycle logs) and new format (thread objects)
+      const raw = data.threads || [];
+      setThreads(
+        raw.map((t: Record<string, string>) => ({
+          id: t.id,
+          title: t.title || t.dialogue || '(untitled)',
+          status: t.status || 'open',
+        }))
+      );
     } catch (err) {
       console.error('Failed to fetch threads:', err);
     } finally {
@@ -46,22 +59,19 @@ export default function ThreadsPanel() {
       <h2 className="text-lg font-mono text-neutral-300 mb-4">Threads</h2>
       <div className="space-y-3 max-h-96 overflow-y-auto">
         {threads.length === 0 && (
-          <p className="text-sm text-neutral-500 font-mono">No recent dialogue</p>
+          <p className="text-sm text-neutral-500 font-mono">No active threads</p>
         )}
         {threads.map((thread) => (
-          <div key={thread.id} className="border-l-2 border-blue-500 pl-3">
-            <div className="text-xs text-neutral-500 font-mono mb-1">
-              {new Date(thread.ts).toLocaleTimeString()} • {thread.mode}
+          <div
+            key={thread.id}
+            className={`border-l-2 ${STATUS_COLORS[thread.status] || 'border-neutral-600'} pl-3`}
+          >
+            <div className="text-sm text-neutral-300 font-mono">
+              {thread.title}
             </div>
-            <div className="text-sm text-neutral-300 font-mono mb-1">
-              {thread.dialogue}
+            <div className="text-xs text-neutral-500 font-mono">
+              {thread.status}
             </div>
-            {thread.internal_monologue && (
-              <div className="text-xs text-neutral-500 font-mono italic">
-                {thread.internal_monologue.slice(0, 80)}
-                {thread.internal_monologue.length > 80 ? '...' : ''}
-              </div>
-            )}
           </div>
         ))}
       </div>

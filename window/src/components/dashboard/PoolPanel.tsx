@@ -1,6 +1,5 @@
 'use client';
 
-import { dashboardApi } from '@/lib/dashboard-api';
 import { useState, useEffect } from 'react';
 
 interface PoolMoment {
@@ -18,7 +17,8 @@ export default function PoolPanel() {
 
   const fetchPool = async () => {
     try {
-      const data = await dashboardApi.getPool();
+      const res = await fetch('http://localhost:8080/api/dashboard/pool');
+      const data = await res.json();
       setPool(data.pool || []);
     } catch (err) {
       console.error('Failed to fetch pool:', err);

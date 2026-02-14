@@ -85,13 +85,13 @@ export function useShopkeeperSocket(): ShopkeeperState & {
         setWindowState(msg.state);
 
         // Handle initial load with recent_entries
-        if (msg.text.recent_entries?.length) {
+        if (msg.text?.recent_entries?.length) {
           setTextEntries(msg.text.recent_entries.slice(0, MAX_TEXT_ENTRIES));
         }
-        if (msg.text.current_thought) {
+        if (msg.text?.current_thought) {
           setCurrentThought(msg.text.current_thought);
         }
-        if (msg.text.activity_label) {
+        if (msg.text?.activity_label) {
           setActivityLabel(msg.text.activity_label);
         }
         break;

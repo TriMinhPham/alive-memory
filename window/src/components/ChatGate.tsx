@@ -32,8 +32,9 @@ export default function ChatGate({ onAuthenticated }: ChatGateProps) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: token.trim() }),
         });
+        const body = await res.json().catch(() => null);
 
-        if (res.ok) {
+        if (res.ok && body?.valid) {
           localStorage.setItem('shopkeeper-token', token.trim());
           onAuthenticated(token.trim());
         } else {
