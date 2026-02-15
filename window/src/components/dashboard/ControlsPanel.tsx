@@ -5,10 +5,28 @@ import { dashboardApi } from '@/lib/dashboard-api';
 
 interface Status {
   heartbeat_active: boolean;
+  heartbeat_status: 'active' | 'late' | 'inactive';
+  last_cycle_ts: string | null;
+  seconds_since_last_cycle: number | null;
+  expected_interval: number;
   engagement_status: string;
   shop_status: string;
   active_visitor: string | null;
 }
+
+function formatTimeSince(seconds: number | null): string {
+  if (seconds === null) return 'never';
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+const HEARTBEAT_STATUS_CONFIG = {
+  active:   { color: 'bg-emerald-500', label: 'Active' },
+  late:     { color: 'bg-yellow-500',  label: 'Late' },
+  inactive: { color: 'bg-red-500',      label: 'Inactive' },
+} as const;
 
 export default function ControlsPanel() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -45,9 +63,9 @@ export default function ControlsPanel() {
     return () => clearInterval(interval);
   }, []);
 
-  const StatusIndicator = ({ active }: { active: boolean }) => (
-    <div className={`h-2 w-2 rounded-full ${active ? 'bg-emerald-500' : 'bg-neutral-600'}`} />
-  );
+  const hbStatus = status
+    ? HEARTBEAT_STATUS_CONFIG[status.heartbeat_status] ?? HEARTBEAT_STATUS_CONFIG.inactive
+    : HEARTBEAT_STATUS_CONFIG.inactive;
 
   if (loading) {
     return (
@@ -77,9 +95,12 @@ export default function ControlsPanel() {
           <div className="flex items-center justify-between">
             <span className="text-sm text-neutral-400 font-mono">Heartbeat</span>
             <div className="flex items-center gap-2">
-              <StatusIndicator active={status.heartbeat_active} />
+              <div className={`h-2 w-2 rounded-full ${hbStatus.color}`} />
               <span className="text-xs text-neutral-500 font-mono">
-                {status.heartbeat_active ? 'Active' : 'Inactive'}
+                {hbStatus.label}
+              </span>
+              <span className="text-xs text-neutral-600 font-mono">
+                {formatTimeSince(status.seconds_since_last_cycle)}
               </span>
             </div>
           </div>
