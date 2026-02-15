@@ -1025,6 +1025,47 @@ The heartbeat wiring already exists — this task is about populating the config
 
 ---
 
+### TASK-034: Integrate markdown.new into feed enrichment pipeline
+**Status:** BACKLOG
+**Priority:** Medium
+**Depends on:** TASK-033 (feed pipeline live)
+**Description:** Replace or augment the current `fetch_readable_text()` in `pipeline/enrich.py` with markdown.new API calls. Current enrichment fetches raw HTML and extracts text — wasteful on tokens and blind to multimedia content.
+markdown.new converts any URL to clean markdown. Benefits:
+- **Articles/essays:** Strips nav, ads, footers. Clean prose only. Major token savings.
+- **YouTube/video:** Extracts transcript + metadata (title, channel, duration). She can "watch" videos.
+- **Music links (Spotify, Bandcamp, SoundCloud):** Extracts track metadata, descriptions, liner notes. She can "listen" to music.
+- **Image-heavy pages:** Extracts alt text, captions, surrounding context. She can "see" visual content.
+This unlocks new content types in the feed. Currently FEED_SOURCES are text-only RSS. After this, you can add YouTube channels, Spotify playlists, music blogs with embedded players — she consumes them all as markdown.
+**Implementation:**
+1. Add `fetch_via_markdown_new(url: str) -> str` to `pipeline/enrich.py`. Call `https://markdown.new/api/v1/convert?url={url}` (or equivalent endpoint). Return clean markdown string.
+2. Update `fetch_readable_text()` to try markdown.new first, fall back to current extraction if the service is unavailable or returns error.
+3. Update `feed_ingester.py` content type detection: if markdown.new returns a transcript → tag as `video`. If it returns track metadata → tag as `music`. If it returns prose → tag as `article`. Store the content type in `content_pool.content_type`.
+4. Update `config/feeds.py`: add 2-3 multimedia sources as examples:
+   - A YouTube channel RSS (e.g., NHK World, Tokyo street walks, ambient music mixes)
+   - A music blog or Bandcamp tag feed
+5. Add rate limiting / caching: don't hit markdown.new more than once per URL. Store the converted markdown in `content_pool.enriched_text` (add column if needed via migration).
+**Scope (files you may touch):**
+- `pipeline/enrich.py` (add markdown.new fetch, update fallback chain)
+- `feed_ingester.py` (content type detection from enriched output)
+- `config/feeds.py` (add multimedia feed sources)
+- `db/content.py` (add enriched_text column query if needed)
+- `migrations/` (new migration if schema change needed)
+**Scope (files you may NOT touch):**
+- `pipeline/cortex.py`
+- `pipeline/basal_ganglia.py`
+- `heartbeat.py`
+- `heartbeat_server.py`
+- `window/`
+**Tests:**
+- test_markdown_new_article — URL returns clean markdown, stripped of HTML
+- test_markdown_new_video — YouTube URL returns transcript + metadata
+- test_markdown_new_fallback — service unavailable, falls back to current extraction
+- test_content_type_detection — video transcript tagged as "video", music as "music", prose as "article"
+- test_no_duplicate_enrichment — same URL not fetched twice
+**Definition of done:** Feed pipeline enriches URLs via markdown.new. She can consume articles, videos, and music from the same pipeline. Content pool shows mixed content types. Token usage per item drops measurably vs raw HTML extraction.
+
+---
+
 ## Completed Tasks
 
 _None yet._
