@@ -999,7 +999,7 @@ In `prompt_assembler.py`: if `habit_boost` is present, add a line to cortex cont
 ---
 
 ### TASK-033: Wire feed ingestion into heartbeat loop + populate feed sources
-**Status:** READY
+**Status:** DONE (2026-02-16)
 **Priority:** High
 **Depends on:** TASK-027 (Feed dashboard panel)
 **Description:** `run_feed_ingestion()` in `feed_ingester.py` is fully built but never fires because `FEED_SOURCES` in `config/feeds.py` is empty (all commented out). The heartbeat loop already has the call site (lines 450-465 of `heartbeat.py`) that imports and calls `run_feed_ingestion()` on a 1-hour interval, and handles pool expiry + capping. But with an empty source list, nothing happens.
