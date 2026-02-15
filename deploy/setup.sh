@@ -31,6 +31,19 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+# ─── 0. Swap file (prevents OOM during Next.js builds) ───
+echo "[0/9] Configuring swap..."
+if [ ! -f /swapfile ]; then
+    fallocate -l 2G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    echo "  2GB swap file created and activated."
+else
+    echo "  Swap file already exists."
+fi
+
 # ─── 1. System packages ───
 echo "[1/9] Installing system packages..."
 apt-get update -qq
