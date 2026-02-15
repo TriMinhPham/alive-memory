@@ -23,12 +23,17 @@ echo "[deploy] Installing Python dependencies..."
 .venv/bin/pip install --quiet --upgrade pip
 .venv/bin/pip install --quiet -r requirements.txt
 
+# ─── Stop service to free RAM for build ───
+echo "[deploy] Stopping shopkeeper service (freeing RAM for build)..."
+sudo systemctl stop shopkeeper
+
 # ─── Build frontend ───
 echo "[deploy] Building frontend..."
 cd window
 rm -rf node_modules .next
 npm ci --silent
 NEXT_PUBLIC_SITE_URL="https://${DOMAIN}" \
+NODE_OPTIONS="--max-old-space-size=1536" \
 npm run build
 cd ..
 
@@ -40,8 +45,8 @@ cd ..
 #   sudo nginx -t && sudo systemctl reload nginx
 
 # ─── Restart service ───
-echo "[deploy] Restarting shopkeeper service..."
-sudo systemctl restart shopkeeper
+echo "[deploy] Starting shopkeeper service..."
+sudo systemctl start shopkeeper
 
 # ─── Health check (retry up to 5 times) ───
 echo "[deploy] Waiting for service to start..."
