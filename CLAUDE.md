@@ -235,3 +235,4 @@ python simulate.py --cycles 10
 - Don't add print statements without `[ModuleName]` prefix
 - Don't modify the character bible or identity without owner approval
 - Don't use `pipeline/executor.py` for new code — it's deprecated
+- Don't pipe test output through `tail` or `head` in background tasks — use `--tb=short` flag instead
