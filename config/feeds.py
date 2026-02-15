@@ -3,10 +3,19 @@
 # Sources the feed ingester will poll
 FEED_SOURCES = [
     # Static URL/quote lists (one item per line)
-    # {'type': 'file', 'path': 'content/readings.txt', 'tags': ['curated']},
+    {'type': 'file', 'path': 'content/readings.txt', 'tags': ['curated']},
 
-    # RSS feeds
-    # {'type': 'rss', 'url': 'https://www.tokyoartbeat.com/en/feed', 'tags': ['art', 'tokyo']},
+    # Core — her identity
+    {'type': 'rss', 'url': 'https://www.spoon-tamago.com/feed/', 'tags': ['tokyo', 'design', 'craft', 'japan']},
+    {'type': 'rss', 'url': 'https://aeon.co/feed.rss', 'tags': ['philosophy', 'essays', 'ideas']},
+    {'type': 'rss', 'url': 'https://www.themarginalian.org/feed/', 'tags': ['philosophy', 'literature', 'wisdom']},
+    {'type': 'rss', 'url': 'https://publicdomainreview.org/feed/', 'tags': ['history', 'curiosities', 'visual_archive']},
+    {'type': 'rss', 'url': 'https://www.tokyoartbeat.com/en/feed', 'tags': ['tokyo', 'art', 'exhibitions']},
+
+    # Adjacent — serendipity
+    {'type': 'rss', 'url': 'https://www.ambientblog.net/blog/feed', 'tags': ['ambient', 'music', 'soundscapes']},
+    {'type': 'rss', 'url': 'https://www.messynessychic.com/feed/', 'tags': ['exploration', 'nostalgia', 'hidden_places']},
+    {'type': 'rss', 'url': 'https://www.lensculture.com/rss', 'tags': ['photography', 'visual', 'artists']},
 ]
 
 FEED_FETCH_INTERVAL = 3600   # seconds between feed checks (1 hour)
