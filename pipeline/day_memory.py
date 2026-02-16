@@ -9,7 +9,7 @@ import clock
 import db
 
 
-MOMENT_THRESHOLD = 0.4
+MOMENT_THRESHOLD = 0.35
 MAX_DAY_MEMORIES = 30
 
 
@@ -82,13 +82,23 @@ def compute_moment_salience(result: dict, ctx: dict) -> float:
                                   (longer/richer cycle output = higher salience)
       0.00–0.10  action diversity — 0.05 per distinct action type, capped 0.10
       +0.08      self-expression — post_x_draft action (write_journal removed: content salience speaks for itself)
+
+    SOLO CYCLE SIGNALS (reward cycles where something actually happened):
+      +0.06      thread touch     — thread_update/create/close action (developing an idea)
+      +0.08      content consumed — mode is consume or news (she read from pool)
+      +0.04      rare action      — any action not in {write_journal, express_thought}
+      +0.05      journal w/ content — write_journal with non-empty detail.text
+
       0.00–0.05  mode bonus   — engage=0.05, express=0.03, consume=0.02
+
+    Recording threshold: 0.35 (lowered from 0.4 to allow solo cycles through).
 
     Final score clamped to [0.0, 1.0].
 
     These continuous factors ensure that even cycles with the same boolean
     signals (e.g., resonance=True + journal_write) produce different salience
     values based on emotional intensity, content depth, and action variety.
+    The solo cycle signals ensure she can form memories even without visitors.
     """
     score = 0.0
 
@@ -151,6 +161,29 @@ def compute_moment_salience(result: dict, ctx: dict) -> float:
     if any(a.get('type') in ('post_x_draft',)
            for a in result.get('actions', [])):
         score += 0.08
+
+    # ── Solo cycle signals: reward cycles where something actually happened ──
+
+    # Thread touch: she's developing an idea, not just drifting
+    if any(a.get('type') in ('thread_update', 'thread_create', 'thread_close')
+           for a in result.get('actions', [])):
+        score += 0.06
+
+    # Content consumed: she read something from the pool (consume/news cycle)
+    if ctx.get('mode') in ('consume', 'news'):
+        score += 0.08
+
+    # Rare action: anything beyond the default express_thought/write_journal loop
+    _routine_actions = {'write_journal', 'express_thought'}
+    if any(a.get('type', '') not in _routine_actions and a.get('type', '')
+           for a in result.get('actions', [])):
+        score += 0.04
+
+    # Journal with distinct content: she wrote something real, not a monologue copy
+    if any(a.get('type') == 'write_journal'
+           and a.get('detail', {}).get('text', '').strip()
+           for a in result.get('actions', [])):
+        score += 0.05
 
     # Mode-based base: some cycle types are inherently more interesting
     mode = ctx.get('mode', '')
