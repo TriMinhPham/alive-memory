@@ -23,4 +23,4 @@ FEED_SOURCES = [
 ]
 
 FEED_FETCH_INTERVAL = 3600   # seconds between feed checks (1 hour)
-MAX_POOL_UNSEEN = 50         # cap unseen items; oldest expire when exceeded
+MAX_POOL_UNSEEN = 200        # cap unseen items; oldest non-curated expire when exceeded

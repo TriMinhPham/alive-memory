@@ -86,6 +86,11 @@ async def ingest_from_file(filepath: str, tags: list[str] = None) -> int:
     for line in lines:
         is_url = bool(re.match(r'https?://', line))
         source_type = 'url' if is_url else 'text'
+
+        # Cross-channel dedup: skip if this URL already exists from any channel
+        if is_url and await db.url_exists_in_pool(line):
+            continue
+
         fingerprint = compute_pool_fingerprint('file', source_type, line)
 
         title = line[:80] if not is_url else ''
@@ -138,6 +143,11 @@ async def ingest_from_rss(feed_url: str, tags: list[str] = None) -> int:
 
         content = link or title
         source_type = 'url' if link else 'rss_headline'
+
+        # Cross-channel dedup: skip if this URL already exists from any channel
+        if link and await db.url_exists_in_pool(link):
+            continue
+
         fingerprint = compute_pool_fingerprint('rss', source_type, content)
 
         metadata = {}

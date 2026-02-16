@@ -312,7 +312,10 @@ async def expire_pool_items():
 
 
 async def cap_unseen_pool(max_unseen: int = 50):
-    """Remove oldest unseen items when pool exceeds cap."""
+    """Remove oldest unseen items when pool exceeds cap.
+
+    Curated items (source_channel='file') are exempt from eviction.
+    """
     conn = await _connection.get_db()
     cursor = await conn.execute(
         "SELECT COUNT(*) FROM content_pool WHERE status = 'unseen'"
@@ -325,6 +328,7 @@ async def cap_unseen_pool(max_unseen: int = 50):
             """DELETE FROM content_pool WHERE id IN (
                 SELECT id FROM content_pool
                 WHERE status = 'unseen'
+                AND source_channel != 'file'
                 ORDER BY added_at ASC
                 LIMIT ?
             )""",
@@ -586,6 +590,18 @@ async def get_consumption_history(limit: int = 20) -> list[dict]:
         })
 
     return result
+
+
+# ── Cross-channel dedup ──
+
+async def url_exists_in_pool(canonical_url: str) -> bool:
+    """Check if a URL already exists in the pool from any channel."""
+    conn = await _connection.get_db()
+    cursor = await conn.execute(
+        "SELECT 1 FROM content_pool WHERE content = ? LIMIT 1",
+        (canonical_url,)
+    )
+    return await cursor.fetchone() is not None
 
 
 # ── Enrichment helpers (TASK-034) ──

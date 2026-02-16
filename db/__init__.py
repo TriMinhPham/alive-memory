@@ -144,6 +144,7 @@ from db.content import (
     get_thread_count_by_status,
     get_unseen_news,
     load_arbiter_state,
+    url_exists_in_pool,
     save_arbiter_state,
     touch_thread,
     update_pool_item,
