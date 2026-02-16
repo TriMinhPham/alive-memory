@@ -34,7 +34,8 @@ body {
   display: grid;
   grid-template-columns: 1fr 320px;
   grid-template-rows: 1fr auto;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   max-width: 1440px;
   margin: 0 auto;
   gap: 0;
@@ -49,6 +50,10 @@ body {
   grid-column: 1;
   grid-row: 1;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
 }
 
 .window-sidebar {
@@ -60,6 +65,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  max-height: 100vh;
 }
 
 /* ─── Scene Canvas ─── */
@@ -68,6 +74,8 @@ body {
   background: var(--color-bg);
   border-radius: 2px;
   overflow: hidden;
+  width: 100%;
+  max-height: 100%;
 }
 
 /* ─── Activity Overlay ─── */
