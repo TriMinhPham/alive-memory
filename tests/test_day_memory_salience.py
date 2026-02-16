@@ -244,8 +244,160 @@ class TestJournalNoSalienceBoost:
             _base_result(actions=[{'type': 'post_x_draft'}]),
             _base_ctx(),
         )
-        # action_diversity (0.05) + self-expression (0.08) = 0.13
-        assert abs((s_post - s_base) - 0.13) < 0.001
+        # action_diversity (0.05) + self-expression (0.08) + rare_action (0.04) = 0.17
+        assert abs((s_post - s_base) - 0.17) < 0.001
+
+
+class TestSoloCycleSignals:
+    """Solo cycle signals let her form memories without visitors."""
+
+    def test_thread_touch_adds_006(self):
+        """Thread update/create/close contributes +0.06."""
+        s_base = compute_moment_salience(_base_result(), _base_ctx())
+        s_thread = compute_moment_salience(
+            _base_result(actions=[{'type': 'thread_update'}]),
+            _base_ctx(),
+        )
+        # thread_touch (0.06) + action_diversity (0.05) + rare_action (0.04)
+        expected_delta = 0.06 + 0.05 + 0.04
+        assert abs((s_thread - s_base) - expected_delta) < 0.001
+
+    def test_thread_create_also_counts(self):
+        """thread_create triggers the thread touch signal too."""
+        s_base = compute_moment_salience(_base_result(), _base_ctx())
+        s_create = compute_moment_salience(
+            _base_result(actions=[{'type': 'thread_create'}]),
+            _base_ctx(),
+        )
+        assert s_create > s_base + 0.06  # at least thread_touch bonus
+
+    def test_content_consumed_adds_008(self):
+        """Consume mode contributes +0.08."""
+        s_base = compute_moment_salience(_base_result(), _base_ctx(mode='idle'))
+        s_consume = compute_moment_salience(
+            _base_result(), _base_ctx(mode='consume'),
+        )
+        # consume mode bonus (0.02) + content_consumed (0.08) = 0.10
+        assert abs((s_consume - s_base) - 0.10) < 0.001
+
+    def test_news_mode_also_counts(self):
+        """News mode also triggers the content consumed signal."""
+        s_consume = compute_moment_salience(
+            _base_result(), _base_ctx(mode='consume'),
+        )
+        s_news = compute_moment_salience(
+            _base_result(), _base_ctx(mode='news'),
+        )
+        # Both get content_consumed (+0.08), but news has no mode_bonus while consume has +0.02
+        # news mode_bonus is 0.0, consume mode_bonus is 0.02
+        assert abs(s_consume - s_news - 0.02) < 0.001
+
+    def test_rare_action_adds_004(self):
+        """Actions beyond write_journal/express_thought contribute +0.04."""
+        s_journal = compute_moment_salience(
+            _base_result(actions=[{'type': 'write_journal'}]),
+            _base_ctx(),
+        )
+        s_rare = compute_moment_salience(
+            _base_result(actions=[{'type': 'rearrange'}]),
+            _base_ctx(),
+        )
+        # Both get action_diversity (0.05), but rearrange also gets rare_action (0.04)
+        assert abs((s_rare - s_journal) - 0.04) < 0.001
+
+    def test_express_thought_is_routine(self):
+        """express_thought does NOT trigger rare action bonus."""
+        s_base = compute_moment_salience(_base_result(), _base_ctx())
+        s_express = compute_moment_salience(
+            _base_result(actions=[{'type': 'express_thought'}]),
+            _base_ctx(),
+        )
+        # Only action_diversity (0.05), no rare_action
+        assert abs((s_express - s_base) - 0.05) < 0.001
+
+    def test_journal_with_content_adds_005(self):
+        """write_journal with non-empty detail.text contributes +0.05."""
+        s_empty_journal = compute_moment_salience(
+            _base_result(actions=[{'type': 'write_journal'}]),
+            _base_ctx(),
+        )
+        s_content_journal = compute_moment_salience(
+            _base_result(actions=[{
+                'type': 'write_journal',
+                'detail': {'text': 'Today I noticed something about the way light falls.'},
+            }]),
+            _base_ctx(),
+        )
+        assert abs((s_content_journal - s_empty_journal) - 0.05) < 0.001
+
+    def test_journal_with_empty_detail_no_bonus(self):
+        """write_journal with empty/whitespace detail.text gets no journal-content bonus."""
+        s_empty = compute_moment_salience(
+            _base_result(actions=[{'type': 'write_journal', 'detail': {'text': ''}}]),
+            _base_ctx(),
+        )
+        s_whitespace = compute_moment_salience(
+            _base_result(actions=[{'type': 'write_journal', 'detail': {'text': '   '}}]),
+            _base_ctx(),
+        )
+        s_no_detail = compute_moment_salience(
+            _base_result(actions=[{'type': 'write_journal'}]),
+            _base_ctx(),
+        )
+        assert s_empty == s_no_detail
+        assert s_whitespace == s_no_detail
+
+
+class TestSoloCycleThresholdScenarios:
+    """Verify the target score ranges from the spec."""
+
+    def test_solo_thread_journal_above_threshold(self):
+        """Solo cycle with thread touch + journal about it scores ~0.43 — above 0.35."""
+        score = compute_moment_salience(
+            _base_result(
+                resonance=True,
+                internal_monologue='word ' * 30,
+                actions=[
+                    {'type': 'thread_update'},
+                    {'type': 'write_journal', 'detail': {'text': 'The thread keeps pulling.'}},
+                ],
+            ),
+            _base_ctx(mode='express', max_drive_delta=0.05),
+        )
+        assert score >= 0.35, f"Thread+journal solo cycle scored {score}, expected >= 0.35"
+        # Should be well above threshold
+        assert score > 0.40, f"Thread+journal solo cycle scored {score}, expected > 0.40"
+
+    def test_routine_express_thought_barely_above(self):
+        """Routine express_thought with resonance scores ~0.35-0.38 — barely above threshold."""
+        score = compute_moment_salience(
+            _base_result(
+                resonance=True,
+                internal_monologue='word ' * 25,
+                actions=[{'type': 'express_thought'}],
+            ),
+            _base_ctx(mode='express', max_drive_delta=0.04),
+        )
+        assert score >= 0.35, f"Routine express cycle scored {score}, expected >= 0.35"
+        # Should be close to threshold, not way above
+        assert score < 0.45, f"Routine express cycle scored {score}, expected < 0.45"
+
+    def test_truly_empty_cycle_below_threshold(self):
+        """Empty idle cycle with no signals scores ~0.0 — well below threshold."""
+        score = compute_moment_salience(_base_result(), _base_ctx())
+        assert score < 0.35, f"Empty cycle scored {score}, expected < 0.35"
+
+    def test_consume_cycle_above_threshold(self):
+        """Consume cycle with resonance and content scores above threshold."""
+        score = compute_moment_salience(
+            _base_result(
+                resonance=True,
+                internal_monologue='This article about ceramics reminded me of something.',
+                actions=[{'type': 'collection_add'}],
+            ),
+            _base_ctx(mode='consume', max_drive_delta=0.06),
+        )
+        assert score >= 0.35, f"Consume cycle scored {score}, expected >= 0.35"
 
 
 class TestOldFlatScoreFixed:
