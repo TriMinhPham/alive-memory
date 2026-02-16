@@ -108,10 +108,12 @@ async def build_initial_state(clock_now: datetime = None) -> dict:
     # Determine status
     if room.shop_status == 'closed':
         status = 'sleeping'
-    elif engagement.status == 'engaged':
-        status = 'awake'
     else:
-        status = 'awake'
+        energy = await db.get_energy_budget()
+        if energy['spent_today'] >= energy['budget']:
+            status = 'resting'
+        else:
+            status = 'awake'
 
     # Resolve scene compositor fields
     sprite_state = resolve_sprite_state(drives, engagement, room, [])
@@ -194,7 +196,11 @@ async def build_cycle_broadcast(
                 ambient.get('diegetic', '') if ambient else ''
             ),
             'time_label': get_time_label(clock_now),
-            'status': 'sleeping' if shop_status == 'closed' else 'awake',
+            'status': (
+                'sleeping' if shop_status == 'closed'
+                else 'resting' if cycle_log.get('budget_rest')
+                else 'awake'
+            ),
             'visitor_present': engagement.status == 'engaged',
             'sprite_state': sprite_state,
             'time_of_day': time_of_day,
