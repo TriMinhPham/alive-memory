@@ -434,7 +434,7 @@ async def select_actions(validated: ValidatedOutput, drives: DrivesState,
             action=dropped.action.type,
             content=dropped.action.detail.get('text', ''),
             target=dropped.action.detail.get('target'),
-            impulse=1.0,
+            impulse=_lookup_impulse(dropped.action.type, validated),
             priority=0.0,
             status='suppressed',
             suppression_reason=f'Validator: {dropped.reason}',
@@ -447,6 +447,18 @@ async def select_actions(validated: ValidatedOutput, drives: DrivesState,
         habit_fired=False,
         energy_budget=energy_remaining,
     )
+
+
+def _lookup_impulse(action_name: str, validated: ValidatedOutput) -> float:
+    """Find the cortex-specified impulse for a dropped action.
+
+    Searches intentions first (Phase 2 format), falls back to 0.5
+    (the Intention default) if no match — never lies with 1.0.
+    """
+    for intention in validated.intentions:
+        if intention.action == action_name:
+            return intention.impulse
+    return 0.5
 
 
 def _find_matching_detail(action_name: str, validated: ValidatedOutput) -> dict:
@@ -505,7 +517,7 @@ def _phase1_passthrough(validated: ValidatedOutput,
             action=dropped.action.type,
             content=dropped.action.detail.get('text', ''),
             target=dropped.action.detail.get('target'),
-            impulse=1.0,
+            impulse=_lookup_impulse(dropped.action.type, validated),
             priority=0.0,
             status='suppressed',
             suppression_reason=dropped.reason,
