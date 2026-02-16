@@ -730,6 +730,23 @@ class Heartbeat:
         cycle_id = str(uuid.uuid4())[:8]
         start_time = clock.now_utc()
 
+        # 0. Ghost engagement sanity check — if engaged but no active visitor,
+        # clear immediately. Prevents stuck-in-conversation loops when a
+        # WebSocket drops without sending visitor_disconnect.
+        engagement_check = await db.get_engagement_state()
+        if engagement_check.status == 'engaged':
+            visitors = await db.get_visitors_present()
+            has_active = any(
+                v.visitor_id == engagement_check.visitor_id
+                for v in visitors
+            )
+            if not has_active:
+                print(f"  [Heartbeat] Cleared ghost engagement — "
+                      f"no active visitor for {engagement_check.visitor_id}")
+                await db.update_engagement_state(
+                    status='none', visitor_id=None, turn_count=0
+                )
+
         # 1. Read inbox (mark read AFTER successful execution to prevent event loss)
         unread = await db.inbox_get_unread()
 

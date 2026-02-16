@@ -709,6 +709,7 @@ class ShopkeeperServer:
         self._window_clients.add(websocket)
         remote = websocket.remote_address
         is_dashboard = False  # Set on successful auth; reserved for future WS content gating
+        ws_visitor_id = None  # Track visitor_id if this WS sent chat messages
         print(f"  {Fore.GREEN}[Window]{Style.RESET_ALL} Viewer connected from {remote}")
         try:
             # Send current state on connect
@@ -734,8 +735,17 @@ class ShopkeeperServer:
                             }))
                     elif msg_type == 'visitor_message':
                         await self._handle_ws_chat(data, websocket)
+                        # Track visitor_id for cleanup on socket drop.
+                        # Derive from token the same way _handle_ws_chat does.
+                        if not ws_visitor_id:
+                            token = data.get('token', '')
+                            if token:
+                                token_info = await db.validate_chat_token(token)
+                                if token_info:
+                                    ws_visitor_id = f'web_{token_info["display_name"].lower().replace(" ", "_")}'
                     elif msg_type == 'visitor_disconnect':
                         await self._handle_ws_disconnect(data)
+                        ws_visitor_id = None  # Explicit disconnect handled
                 except (json.JSONDecodeError, KeyError):
                     pass
         except Exception as e:
@@ -746,6 +756,26 @@ class ShopkeeperServer:
                 print(f"  {Fore.YELLOW}[Window]{Style.RESET_ALL} WS error: {err_name}: {e}")
         finally:
             self._window_clients.discard(websocket)
+            # Clean up ghost engagement if this WS had an active visitor
+            if ws_visitor_id:
+                try:
+                    print(f"  {Fore.YELLOW}[Window]{Style.RESET_ALL} "
+                          f"Socket dropped for {ws_visitor_id} — cleaning up")
+                    await db.remove_visitor_present(ws_visitor_id)
+                    disconnect_event = Event(
+                        event_type='visitor_disconnect',
+                        source=f'visitor:{ws_visitor_id}',
+                        payload={'reason': 'ws_dropped'},
+                    )
+                    await on_visitor_disconnect(disconnect_event)
+                    await self.heartbeat.schedule_microcycle()
+                    engagement = await db.get_engagement_state()
+                    if engagement.visitor_id == ws_visitor_id:
+                        await db.update_engagement_state(
+                            status='none', visitor_id=None, turn_count=0
+                        )
+                except Exception:
+                    pass
             print(f"  {Fore.GREEN}[Window]{Style.RESET_ALL} Viewer disconnected")
 
     async def _handle_ws_chat(self, data: dict, websocket):

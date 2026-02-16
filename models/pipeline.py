@@ -87,7 +87,7 @@ class CortexOutput:
                     action=a.type,
                     target=a.detail.get('target'),
                     content=a.detail.get('text', ''),
-                    impulse=1.0,
+                    impulse=0.5,  # default — no impulse data in old format
                 )
                 for a in actions
             ]
