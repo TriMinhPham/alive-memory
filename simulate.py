@@ -7,12 +7,15 @@ Usage:
     python simulate.py --days 7 --visitors experiments/visitors.json
     python simulate.py --days 1 --start 2026-02-10T07:00 --quiet
     python simulate.py --days 7 --energy-budget 2.0 --output experiments/run_a/
+    python simulate.py --days 7 --energy-budget 2.0 --run-label sim_v2_tight --output experiments/
 
 The shopkeeper runs the real pipeline with real LLM calls against a
 separate simulation DB, using a virtual clock that advances instantly
 instead of waiting. With --visitors, scripted visitor interactions are
 injected at the correct simulated times. With --energy-budget, the daily
-energy budget is overridden (default: 4.0).
+energy budget is overridden (default: 4.0). With --run-label, output
+files use the label as filename (e.g. sim_v2_tight.db) instead of
+timestamp+uuid.
 """
 
 import argparse
@@ -239,6 +242,7 @@ async def run_simulation(
     quiet: bool = False,
     energy_budget: float = None,
     output_dir: str = None,
+    run_label: str = None,
 ):
     """Main simulation loop."""
 
@@ -259,12 +263,19 @@ async def run_simulation(
             return result
         db.get_energy_budget = _patched_get_energy_budget
 
-    # 2. Create simulation DB (run_id ensures uniqueness across reruns)
-    run_id = str(uuid.uuid4())[:8]
-    ts_str = start.strftime('%Y%m%d_%H%M%S')
+    # 2. Create simulation DB
     sim_db_dir = pathlib.Path(output_dir) if output_dir else pathlib.Path('data/sim')
     sim_db_dir.mkdir(parents=True, exist_ok=True)
-    sim_db_path = str(sim_db_dir / f'sim_{ts_str}_{run_id}.db')
+    if run_label:
+        # Named run: deterministic filenames for easy reference
+        sim_db_path = str(sim_db_dir / f'{run_label}.db')
+        log_base = run_label
+    else:
+        # Default: unique filenames via timestamp + uuid
+        run_id = str(uuid.uuid4())[:8]
+        ts_str = start.strftime('%Y%m%d_%H%M%S')
+        sim_db_path = str(sim_db_dir / f'sim_{ts_str}_{run_id}.db')
+        log_base = f'timeline_{ts_str}_{run_id}'
     db.set_db_path(sim_db_path)
     await db.init_db()
 
@@ -285,7 +296,7 @@ async def run_simulation(
         print(f"  Loaded {len(visitor_schedule)} visitor events from {visitor_file}")
 
     # 6. Create timeline logger
-    log_path = str(sim_db_dir / f'timeline_{ts_str}_{run_id}.log')
+    log_path = str(sim_db_dir / f'{log_base}.log')
     tl = TimelineLogger(log_path, start)
 
     # 7. Initialize heartbeat (no event loop task)
@@ -468,6 +479,7 @@ Examples:
   python simulate.py --days 7 --visitors experiments/visitors.json
   python simulate.py --days 1 --start 2026-02-10T07:00 --quiet
   python simulate.py --days 7 --energy-budget 2.0 --output experiments/run_a/
+  python simulate.py --days 7 --energy-budget 2.0 --run-label sim_v2_tight --output experiments/
         """,
     )
     parser.add_argument('--days', type=int, default=1, help='Days to simulate (default: 1)')
@@ -479,6 +491,8 @@ Examples:
                         help='Override daily energy budget (default: 4.0)')
     parser.add_argument('--output', default=None,
                         help='Output directory for DB and timeline log (default: data/sim/)')
+    parser.add_argument('--run-label', default=None,
+                        help='Label for output files (e.g. sim_v2_tight → sim_v2_tight.db)')
     args = parser.parse_args()
 
     start = None
@@ -497,6 +511,7 @@ Examples:
         quiet=args.quiet,
         energy_budget=args.energy_budget,
         output_dir=args.output,
+        run_label=args.run_label,
     ))
 
 

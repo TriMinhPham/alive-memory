@@ -32,6 +32,18 @@
     ]
   },
   {
+    "visitor_id": "curiosity_probe",
+    "display_name": "Koji",
+    "arrive_day": 5,
+    "arrive_hour": 16,
+    "messages": [
+      {"delay_min": 0, "text": "Excuse me — I was walking past and the window caught my eye."},
+      {"delay_min": 4, "text": "I broke a plate yesterday and just threw it away. My grandmother would have been horrified — she fixed everything with gold lacquer."},
+      {"delay_min": 8, "text": "Do you think objects remember being broken? Or is that just us projecting?"},
+      {"delay_min": 12, "text": "Sorry, strange question. I've been thinking about what we keep and what we discard."}
+    ]
+  },
+  {
     "visitor_id": "quiet_browser",
     "display_name": "M.",
     "arrive_day": 5,
