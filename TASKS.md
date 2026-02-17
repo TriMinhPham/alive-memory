@@ -1322,6 +1322,594 @@ Part C:
 
 ---
 
+### TASK-041: Curiosity Phase 1 — Notification layer + read_content action
+
+**Status:** READY
+**Priority:** High (system blocker — curiosity is broken without this)
+**Branch:** feat/curiosity-v2
+**Depends on:** TASK-033 (feed ingestion live), TASK-034 (markdown.new enrichment)
+**Design doc:** `docs/curiosity-v2-spec.md` §1, §5a
+
+**Description:** Content currently sits in the content pool waiting for a "consume" cycle that never fires because curiosity is pinned at 3%. Replace the pull model with a push model: surface N content titles per cycle as notifications in the sensorium. Add `read_content` and `save_for_later` as actions the cortex can choose. Remove the "consume" cycle type from the arbiter.
+
+This is the foundation layer. No gap detection yet — notifications surface based on recency, source diversity, and unseen status. The cortex sees titles and decides whether to engage. This alone should produce content consumption because the decision is now the cortex's, not the arbiter's.
+
+**Implementation:**
+
+**Step 1 — Notification module.** Create `pipeline/notifications.py`:
+
+- `NOTIFICATION_CONFIG` dict: `max_per_cycle=5`, `min_per_cycle=1`, `cooldown_minutes=10`, priority weights (recency 0.4, source_diversity 0.3, unseen 0.3).
+- `Notification` dataclass: `content_id`, `title`, `source`, `content_type`, `surfaced_at`.
+- `get_notifications(db, cycle_context) -> list[Notification]`: Pull N items from content_pool, respecting cooldowns. Title-only — no full content loaded. Track surfaced items in a `notification_log` table (content_id, surfaced_at) for cooldown enforcement.
+- Notifications are ephemeral per cycle. If she doesn't engage, they scroll past. Can re-surface after cooldown.
+
+**Step 2 — Sensorium integration.** Update `pipeline/sensorium.py`:
+
+- Import and call `get_notifications()` during perception assembly.
+- Format notifications as sensory text appended to the perception block:
+
+  ```
+  You notice some things in your feed:
+    • "Title here" (Source: RSS Name) — article
+    • "Another title" (Source: Feed Name) — video
+  ```
+- When visitor is present, still include notifications but mark them as background: `"(In the background, you notice: ...)"`
+
+**Step 3 — New actions.** Update `pipeline/action_registry.py`:
+
+- Add `read_content`: `enabled=True`, `generative=True`, `energy_cost=1.5`, cooldown 2 cycles (min_cycles_between_reads). Prerequisites: content_id must be valid in content_pool.
+- Add `save_for_later`: `enabled=True`, `generative=False`, `energy_cost=0.0`, no cooldown. Adds a `saved_by_cortex=True` flag to the content_pool item. Saved items get priority boost on next surfacing and skip cooldown.
+
+**Step 4 — Body execution.** Update `pipeline/body.py`:
+
+- `read_content` handler: Fetch full content from content_pool (use cached `enriched_text` from TASK-034 if available, otherwise fetch via `pipeline/enrich.py`). Truncate to 1500 tokens. Return content in `ActionResult.payload["full_content"]` for the reflection step (TASK-044).
+- `save_for_later` handler: Update content_pool item with `saved_by_cortex=True` and `saved_at` timestamp.
+
+**Step 5 — Remove consume cycle type.** Update `pipeline/arbiter.py`:
+
+- Remove `"consume"` from the routing decision enum / cycle type list.
+- Remove any logic that schedules consume cycles based on curiosity threshold.
+- Content consumption now happens through `read_content` action within any cycle type (idle, ambient, even during engagement if she chooses to mention content).
+
+**Step 6 — Attention queue for saved items.** Update `db/content.py`:
+
+- Add `saved_by_cortex` boolean and `saved_at` timestamp columns to content_pool (migration).
+- `get_notifications()` gives priority boost (+0.3 to surfacing score) to saved items and skips cooldown for them.
+- Saved items that haven't been read within 48 hours lose saved status (auto-expire).
+
+**Step 7 — Stop curiosity time drift.** Update `pipeline/hypothalamus.py`:
+
+- Remove or zero out the existing curiosity time-based drift (+0.03/hr or whatever the current rate is). Curiosity will be driven by gap detection in TASK-042, not by a timer.
+- Keep the curiosity float temporarily — it will be replaced with diversive/epistemic in TASK-043.
+
+**Step 8 — Prompt assembler.** Update `prompt_assembler.py`:
+
+- Add `read_content(content_id)` and `save_for_later(content_id)` to the available actions block.
+- Include notification text from sensorium in the perception section.
+
+**Migration:** `migrations/012_notifications.sql`:
+
+- `notification_log` table: content_id TEXT, surfaced_at TEXT, cycle_id INTEGER
+- Add `saved_by_cortex` BOOLEAN DEFAULT FALSE and `saved_at` TEXT to content_pool
+
+**Scope (files you may touch):**
+
+- `pipeline/notifications.py` (new)
+- `pipeline/sensorium.py` (add notification channel)
+- `pipeline/action_registry.py` (add read_content, save_for_later)
+- `pipeline/body.py` (add execution handlers)
+- `pipeline/arbiter.py` (remove consume cycle type)
+- `pipeline/hypothalamus.py` (zero out curiosity time drift)
+- `prompt_assembler.py` (add actions + notification context)
+- `db/content.py` (saved_by_cortex, notification_log queries)
+- `migrations/012_notifications.sql` (new)
+- `models/pipeline.py` (Notification dataclass, update ActionResult if needed)
+
+**Scope (files you may NOT touch):**
+
+- `pipeline/cortex.py` (prompt changes go through assembler)
+- `pipeline/output.py` (reflection is TASK-044)
+- `pipeline/thalamus.py` (gap-based filtering is TASK-042)
+- `heartbeat_server.py`
+- `window/`
+- `sleep.py`
+
+**Tests:**
+
+- `tests/test_notifications.py`:
+  - test_get_notifications_returns_n_items — returns up to max_per_cycle items
+  - test_cooldown_enforced — same item not surfaced within cooldown_minutes
+  - test_saved_items_priority — saved items surface before unsaved
+  - test_saved_items_skip_cooldown — saved items ignore cooldown
+  - test_saved_items_expire — saved items older than 48h lose saved status
+  - test_empty_pool_returns_empty — no crash on empty content_pool
+  - test_source_diversity — doesn't spam all items from one source
+- `tests/test_action_read_content.py`:
+  - test_read_content_fetches_full_text — action returns full content in payload
+  - test_read_content_truncates — content over 1500 tokens is truncated
+  - test_read_content_cooldown — blocked if fired within min_cycles_between_reads
+  - test_save_for_later_flags_item — content_pool item gets saved_by_cortex=True
+- Existing arbiter tests updated: no consume cycle type in routing decisions.
+
+**Definition of done:** Content titles flow past her every cycle as sensory input. She can choose to read or save items. The consume cycle type is gone. Curiosity no longer drifts on a timer. Content pool items actually get read.
+
+---
+
+### TASK-042: Curiosity Phase 2 — Gap detector + visitor speech gaps
+
+**Status:** BLOCKED (on TASK-041)
+**Priority:** High
+**Branch:** feat/curiosity-v2
+**Depends on:** TASK-041 (notifications exist to run gap detection on)
+**Design doc:** `docs/curiosity-v2-spec.md` §2, §3
+
+**Description:** Build the information gap detector — the core innovation of curiosity v2. Compares any text input (notification titles, visitor speech, her own journal entries) against her memory pool + totems + active threads. Scores each input on the Goldilocks curve: foreign (< 0.15 relevance) = ignored, partial match (0.15–0.85) = curiosity spike, fully known (> 0.85) = ignored. Peak curiosity at 0.5 relevance (maximum information gap).
+
+This is where visitor input gets wired into the curiosity system. Visitor speech flows through the same gap detector as notifications. A visitor mentioning something she partially understands generates the same curiosity spike as a matching notification title.
+
+**Implementation:**
+
+**Step 1 — TextFragment union type.** Add to `models/pipeline.py`:
+
+```python
+@dataclass
+class TextFragment:
+    text: str
+    source_type: str        # "notification", "visitor_speech", "journal", "monologue"
+    source_id: str           # content_id, visitor_id, journal_entry_id, cycle_id
+    content_id: Optional[str] = None  # Only for notifications — needed for read_content
+```
+
+**Step 2 — Gap detector module.** Create `pipeline/gap_detector.py`:
+
+- `GapScore` dataclass: `fragment: TextFragment`, `relevance: float`, `gap_type: str` ("foreign"/"partial"/"known"), `matching_memories: list[str]`, `matching_threads: list[str]`, `curiosity_delta: float`, `suggested_curiosity_type: str` ("diversive"/"epistemic"/None).
+- `detect_gaps(fragments: list[TextFragment], memory_embeddings, totem_embeddings, thread_embeddings) -> list[GapScore]`:
+  - Use embedding cosine similarity (Option A from spec).
+  - `relevance` = max similarity score across all memory/totem/thread embeddings.
+  - Goldilocks curve: `gap_intensity = 1.0 - abs(relevance - 0.5) * 2`. Peak at 0.5.
+  - `curiosity_delta = gap_intensity * 0.15` (max +0.15 per item).
+  - If relevance < 0.15: `gap_type = "foreign"`, `curiosity_delta = 0.0`.
+  - If relevance > 0.85: `gap_type = "known"`, `curiosity_delta = 0.0`.
+  - If matching_threads or strong totems: `suggested_curiosity_type = "epistemic"`. Else: `"diversive"`.
+
+**Step 3 — Pre-embed notification titles.** Update `feed_ingester.py`:
+
+- After enriching content, embed the title using `pipeline/embed.py` and store the embedding vector in content_pool (`title_embedding` column, migration).
+- Gap detection at cycle time is then pure vector math — no API calls.
+
+**Step 4 — Embed visitor speech.** Update `pipeline/sensorium.py`:
+
+- When processing `visitor_speech` events, create a `TextFragment` with `source_type="visitor_speech"`.
+- Embed the visitor's message text (if not already embedded from cold memory pipeline).
+- Pass visitor speech fragments through gap detection alongside notification fragments.
+
+**Step 5 — Build embedding index.** Create `pipeline/gap_detector.py` helper:
+
+- `load_embedding_index(db) -> EmbeddingIndex`: Preload all memory, totem, and thread embeddings into a numpy array at heartbeat startup. Refresh every N cycles (configurable, default 50).
+- Cosine similarity is a single matrix multiplication: `similarities = index @ query_embedding`.
+- This keeps gap detection under 10ms per cycle even with 1000+ memories.
+
+**Step 6 — Wire into sensorium.** Update `pipeline/sensorium.py`:
+
+- After assembling notifications and visitor speech fragments, run `detect_gaps()` on all fragments.
+- Attach `GapScore` to each notification/perception.
+- Format gap-aware notification text for cortex:
+
+  ```
+  You notice some things in your feed:
+    • "Rare 1991 Bandai Prism Cards Surface" (Vintage Card Weekly)
+      — this connects to something you know about [totem/memory topic]
+    • "New Urushi Lacquer Techniques" (Tokyo Art Beat)
+      — you've heard of urushi but don't know the details
+  ```
+- For visitor speech with partial match:
+
+  ```
+  Something your visitor said connects to [memory/totem].
+  You partially understand this but there's more to learn.
+  ```
+
+**Step 7 — Thalamus gap-aware filtering.** Update `pipeline/thalamus.py`:
+
+- `compute_notification_salience(gap_score, cycle_context) -> float`:
+  - Base salience = `gap_score.curiosity_delta` (0.0 to 0.15)
+  - Visitor present: `× 0.3` unless notification matches conversation topic (`× 1.5`)
+  - Low energy (< 0.2): `× 0.2`
+  - High diversive curiosity (> 0.6): `× 1.3`
+  - Epistemic match (notification matches an active question from TASK-043): `+ 0.5`
+  - Below threshold (0.03): notification filtered out entirely
+- Notifications below threshold don't appear in cortex prompt.
+
+**Step 8 — Curiosity drive update.** Update `pipeline/hypothalamus.py`:
+
+- Sum `curiosity_delta` from all gap scores that passed thalamus filtering.
+- Apply to curiosity float: `curiosity += sum(deltas)`.
+- This replaces the old timer-based drift with stimulus-driven spikes.
+- Curiosity still decays passively but at a much lower rate (`-0.005/hr` instead of previous rate) — enough to prevent permanent ceiling but slow enough that gap-driven spikes actually accumulate.
+
+**Migration:** `migrations/013_gap_detection.sql`:
+
+- Add `title_embedding` BLOB column to content_pool
+
+**Scope (files you may touch):**
+
+- `pipeline/gap_detector.py` (new)
+- `pipeline/sensorium.py` (wire fragments + gap scores into perception)
+- `pipeline/thalamus.py` (gap-aware salience filtering)
+- `pipeline/hypothalamus.py` (stimulus-driven curiosity update)
+- `feed_ingester.py` (embed titles at ingestion)
+- `pipeline/embed.py` (if helper functions needed)
+- `db/content.py` (title_embedding column)
+- `migrations/013_gap_detection.sql` (new)
+- `models/pipeline.py` (TextFragment, GapScore dataclasses)
+
+**Scope (files you may NOT touch):**
+
+- `pipeline/cortex.py`
+- `pipeline/basal_ganglia.py`
+- `pipeline/body.py`
+- `pipeline/output.py`
+- `heartbeat.py`
+- `heartbeat_server.py`
+- `window/`
+- `sleep.py`
+
+**Tests:**
+
+- `tests/test_gap_detector.py`:
+  - test_foreign_content_no_curiosity — relevance < 0.15 → delta = 0.0
+  - test_known_content_no_curiosity — relevance > 0.85 → delta = 0.0
+  - test_partial_match_generates_curiosity — relevance ~0.5 → max delta
+  - test_goldilocks_curve_shape — delta at 0.3 < delta at 0.5 > delta at 0.7
+  - test_epistemic_when_thread_matches — matching thread → suggested_type = "epistemic"
+  - test_diversive_when_no_thread — no matching thread → suggested_type = "diversive"
+  - test_visitor_speech_through_gap_detector — visitor TextFragment produces valid GapScore
+  - test_embedding_index_performance — 1000 memories, gap detection completes in < 50ms
+- `tests/test_thalamus_notifications.py`:
+  - test_visitor_present_suppresses — salience reduced when visitor present
+  - test_topic_match_boosts — notification matching conversation topic gets boosted
+  - test_low_energy_suppresses — tired = notices less
+  - test_below_threshold_filtered — gap_score below 0.03 not included in cortex prompt
+- `tests/test_hypothalamus_curiosity.py`:
+  - test_gap_driven_curiosity_increase — partial matches increase curiosity
+  - test_no_gap_no_increase — foreign/known content doesn't move curiosity
+  - test_passive_decay_slow — curiosity decays at 0.005/hr, not the old fast rate
+  - test_curiosity_accumulates — multiple partial matches in one cycle sum up
+
+**Definition of done:** Gap detector scores all text inputs on the Goldilocks curve. Notifications and visitor speech both generate curiosity spikes on partial match. Thalamus filters notifications based on state. Curiosity is driven by stimulus, not a timer. She notices things that connect to what she knows.
+
+---
+
+### TASK-043: Curiosity Phase 3 — Split drives (diversive + epistemic curiosities)
+
+**Status:** BLOCKED (on TASK-042)
+**Priority:** High
+**Branch:** feat/curiosity-v2
+**Depends on:** TASK-042 (gap detector produces curiosity_type classification)
+**Design doc:** `docs/curiosity-v2-spec.md` §4
+
+**Description:** Replace the single `curiosity` float with two distinct drive mechanisms: `diversive_curiosity` (background scanning urge — "I want to find something new") and `epistemic_curiosities` (topic-tagged active questions — "I want to know THIS specific thing"). These serve different behavioral functions and have different lifecycles.
+
+**Implementation:**
+
+**Step 1 — Drives state update.** Update `models/state.py`:
+
+- Replace `curiosity: float` in DrivesState with `diversive_curiosity: float`.
+- Add `epistemic_curiosities: list[EpistemicCuriosity]` (new dataclass).
+- `EpistemicCuriosity` dataclass:
+
+  ```python
+  @dataclass
+  class EpistemicCuriosity:
+      id: str
+      topic: str                      # "1991 Bandai prism card variants"
+      question: str                   # "Are there more variants I haven't seen?"
+      intensity: float                # 0.0 to 1.0
+      source_type: str                # "notification", "visitor", "journal_reflection"
+      source_id: str
+      created_at: str                 # ISO timestamp
+      last_reinforced_at: str
+      decay_rate_per_hour: float      # Default 0.02
+      resolved: bool = False
+      resolution_source: Optional[str] = None
+  ```
+- Configuration constants:
+
+  ```python
+  EPISTEMIC_CONFIG = {
+      "max_active": 5,
+      "creation_threshold": 0.08,
+      "merge_similarity": 0.80,
+      "decay_rate_default": 0.02,
+      "reinforcement_boost": 0.10,
+      "resolution_mood_bump": 0.08,
+      "eviction_policy": "lowest_intensity",
+  }
+  ```
+
+**Step 2 — DB tables.** Update `db/state.py`:
+
+- Migration: rename `curiosity` to `diversive_curiosity` in drives_state (or add new column and deprecate old).
+- New table `epistemic_curiosities`: id, topic, question, intensity, source_type, source_id, created_at, last_reinforced_at, decay_rate, resolved, resolution_source.
+- CRUD: `get_active_epistemic_curiosities(db, limit=5)`, `upsert_epistemic_curiosity(db, ec)`, `resolve_epistemic_curiosity(db, id, resolution_source)`, `decay_epistemic_curiosities(db, elapsed_hours)`, `evict_weakest_curiosity(db)`.
+
+**Step 3 — Diversive curiosity drive.** Update `pipeline/hypothalamus.py`:
+
+- `diversive_curiosity` replaces `curiosity`.
+- Equilibrium: 0.40. Homeostatic pull rate: 0.15 (spring constant).
+- Time drift: +0.005/hr (tiny background restlessness — NOT the old +0.03/hr).
+- Fed by: gap detection partial matches with `suggested_type = "diversive"`.
+- Drained by: successful content consumption (slightly, -0.05 — satisfied). Visitor conversation (attention elsewhere, -0.02/cycle while engaged).
+- Boredom escalation: if no notifications with gap > 0 for 2 hours, drift increases to +0.02/hr.
+
+**Step 4 — Epistemic curiosity lifecycle.** Update `pipeline/output.py`:
+
+- **Birth:** After cortex processes a cycle where a gap score had `suggested_type = "epistemic"` and the cortex engaged with it (read, mentioned, or articulated a question in monologue), create or reinforce an `EpistemicCuriosity`.
+  - The question text comes from the cortex output. Add `new_epistemic_question: Optional[str]` to CortexOutput schema. If cortex articulates a question, output.py parses it and creates the EC.
+  - If cortex doesn't articulate a question but gap_score suggested epistemic, template it: "What more is there to know about [topic]?"
+  - Check merge: if new question is > 0.80 similar (embedding) to an existing EC, reinforce the existing one (+0.10 intensity) instead of creating a duplicate.
+- **Reinforcement:** When a gap score matches an existing EC's topic (embedding similarity > 0.6), boost intensity by +0.10. Update `last_reinforced_at`.
+- **Decay:** In `pipeline/hypothalamus.py`, every cycle: for each EC, `intensity -= decay_rate * elapsed_hours`. Below 0.05 → quietly expire. Expired ECs become `self_reflection_seed`: "I was wondering about [topic] but I've moved on."
+- **Eviction:** When at max_active (5) and a new question with higher intensity arrives, evict the lowest-intensity EC. Evicted EC also becomes a self_reflection_seed.
+- **Resolution:** Handled in TASK-044 (reflection loop). When content answers a question, EC is resolved with mood bump.
+
+**Step 5 — Cortex output schema update.** Update cortex response parsing in `pipeline/cortex.py` (via prompt_assembler):
+
+- Add optional field to intentions: `epistemic_question: Optional[str]` — the cortex can articulate what it's wondering about.
+- This is a prompt change, not a code change in cortex.py. Update `prompt_assembler.py` to include:
+
+  ```
+  If something raises a specific question in your mind, you can express it:
+    epistemic_question: "What you're wondering about"
+  ```
+
+**Step 6 — Drives-to-feelings.** Update `prompt_assembler.py`:
+
+- Diversive curiosity feelings:
+  - > 0.7: "Your attention keeps drifting. You want to find something — you don't know what yet."
+  - > 0.5: "Part of you is scanning, open to whatever catches your eye."
+  - < 0.15: "You're content. Nothing is pulling your attention anywhere."
+- Epistemic curiosity feelings (from active ECs):
+  - Strongest EC > 0.7: "You keep coming back to this: [question]. It won't leave you alone."
+  - Strongest EC > 0.4: "In the back of your mind: [question]"
+  - Multiple active: "You're also loosely thinking about: [topic1], [topic2]"
+
+**Step 7 — Thalamus epistemic boost.** Update `pipeline/thalamus.py`:
+
+- When computing notification salience, check if the notification's gap_score topic matches any active EC (embedding similarity > 0.6).
+- If match: add +0.5 to salience. Strong pull — this might answer something she's wondering.
+
+**Step 8 — Backward compatibility.** Update all places that read `drives.curiosity`:
+
+- `prompt_assembler.py`: map `diversive_curiosity` to the old curiosity slot in the drives display.
+- Dashboard: show `diversive_curiosity` where `curiosity` was, add EC list below it.
+- Any thresholds that checked curiosity > X now check diversive_curiosity > X.
+
+**Migration:** `migrations/014_epistemic_curiosities.sql`:
+
+- Create `epistemic_curiosities` table
+- Rename or alias `curiosity` → `diversive_curiosity` in drives_state
+
+**Scope (files you may touch):**
+
+- `models/state.py` (DrivesState, EpistemicCuriosity)
+- `pipeline/hypothalamus.py` (diversive drive math, EC decay)
+- `pipeline/output.py` (EC birth, reinforcement, eviction)
+- `pipeline/thalamus.py` (EC matching boost)
+- `prompt_assembler.py` (drives-to-feelings, EC context, epistemic_question instruction)
+- `db/state.py` (EC CRUD, drives rename)
+- `migrations/014_epistemic_curiosities.sql` (new)
+- `models/pipeline.py` (update CortexOutput with epistemic_question)
+- `config/` (EPISTEMIC_CONFIG constants)
+
+**Scope (files you may NOT touch):**
+
+- `pipeline/cortex.py` (changes go through prompt_assembler)
+- `pipeline/body.py`
+- `pipeline/basal_ganglia.py`
+- `heartbeat.py`
+- `heartbeat_server.py`
+- `window/` (dashboard updates are a separate task)
+- `sleep.py`
+
+**Tests:**
+
+- `tests/test_epistemic_curiosity.py`:
+  - test_ec_created_from_gap — epistemic gap score with cortex question → EC in DB
+  - test_ec_merged_on_similar — new question similar to existing → existing reinforced, no duplicate
+  - test_ec_decays_over_time — intensity drops by decay_rate * hours
+  - test_ec_expires_below_threshold — intensity < 0.05 → removed, reflection seed created
+  - test_ec_eviction_at_max — 6th question evicts weakest, seed created for evicted
+  - test_ec_reinforced_by_related_content — matching gap score boosts intensity +0.10
+  - test_ec_max_active_five — never more than 5 active ECs
+- `tests/test_diversive_curiosity.py`:
+  - test_equilibrium_pull — diversive_curiosity pulled toward 0.40
+  - test_time_drift_minimal — +0.005/hr, not old +0.03/hr
+  - test_boredom_escalation — no stimulus for 2h → drift increases
+  - test_consumption_satisfaction — reading content reduces diversive slightly
+  - test_visitor_suppresses_diversive — engaged in conversation → diversive drops
+- `tests/test_drives_backward_compat.py`:
+  - test_old_curiosity_references_map — anything reading drives.curiosity gets diversive_curiosity
+  - test_dashboard_shows_diversive — drives endpoint returns diversive_curiosity
+
+**Definition of done:** Single curiosity float replaced with diversive_curiosity + epistemic_curiosities list. Questions form from gap detection, reinforce on related content, decay when unfed, expire gracefully. Diversive curiosity has tiny time drift and is primarily stimulus-driven. She has specific things she wonders about, not just a generic hunger bar.
+
+---
+
+### TASK-044: Curiosity Phase 4 — Reflection loop + resolution rewards
+
+**Status:** BLOCKED (on TASK-043)
+**Priority:** High
+**Branch:** feat/curiosity-v2
+**Depends on:** TASK-041 (read_content action exists), TASK-043 (epistemic curiosities exist to resolve)
+**Design doc:** `docs/curiosity-v2-spec.md` §5b–5d
+
+**Description:** The missing step that makes content consumption generative. After she reads content, she gets a reflection prompt. Reflection can produce memories, totems, thread touches, new epistemic curiosities, and resolve existing ones. Resolving a question produces a mood reward. Reading without producing anything is acknowledged as boring. Content becomes fuel for growth, not a drive drain.
+
+**Implementation:**
+
+**Step 1 — Reflection prompt.** Add to `prompt_assembler.py`:
+
+- When `read_content` action was executed this cycle (detected in output.py via action_result), assemble a reflection section appended to the next cycle's prompt (or as a follow-up in the same cycle if architecturally feasible):
+
+  ```
+  You just read this:
+  ---
+  {full_content truncated to 1500 tokens}
+  ---
+
+  {epistemic_context — if she had a relevant active question:
+   "You've been wondering: {question}. Does this help?"}
+
+  Consider:
+  - Does this connect to anything you know or have experienced?
+  - Does this answer a question you've had?
+  - Does this raise new questions?
+  - Is there something here worth remembering?
+  - Would any of your visitors find this interesting?
+
+  Respond with your genuine reaction. If it doesn't move you, say so.
+  ```
+
+**Step 2 — Cortex output extension for reflection.** Update `models/pipeline.py`:
+
+- Add optional fields to CortexOutput for reflection responses:
+
+  ```python
+  reflection_memory: Optional[str]       # Text worth remembering
+  reflection_question: Optional[str]     # New question raised
+  resolves_question: Optional[str]       # ID of EC this answers
+  relevant_to_visitor: Optional[str]     # Visitor ID who'd find this interesting
+  relevant_to_thread: Optional[str]      # Thread ID this connects to
+  ```
+- Update cortex response parsing to extract these fields when a reflection prompt was included.
+
+**Step 3 — Reflection processing in output.py.** Update `pipeline/output.py`:
+
+- After a `read_content` action is executed, check if cortex produced reflection outputs.
+- `process_reflection(cortex_output, gap_scores, active_ecs, db)`:
+  - **New memory:** If `reflection_memory` is non-empty, create a memory entry via `db.insert_memory()` or equivalent. Tag with source content_id.
+  - **New totem:** If `relevant_to_visitor` is set and reflection connects content to a visitor, update totem weight for that visitor (+0.1 toward the content's topic).
+  - **Thread touch:** If `relevant_to_thread` is set, update thread's last_activity and append a note.
+  - **New epistemic curiosity:** If `reflection_question` is non-empty, route through EC creation (same birth logic as TASK-043 Step 4).
+  - **Resolve epistemic curiosity:** If `resolves_question` matches an active EC:
+    - Mark EC as resolved in DB.
+    - Apply mood reward: `mood_valence += EPISTEMIC_CONFIG["resolution_mood_bump"]` (0.08).
+    - Log resolution event to timeline.
+    - Create memory: "I learned: [summary]. This answered my question about [topic]."
+  - **Boring content:** If reflection is empty or expresses disinterest:
+    - `diversive_curiosity -= 0.02` (slightly less restless — she tried).
+    - `energy -= 0.01` (slight cost of wasted time).
+    - No other effects.
+
+**Step 4 — Drive effects from reflection.** Update drive adjustments in `pipeline/output.py`:
+
+- **CRITICAL:** Reading content NEVER drains curiosity. This is the core design change.
+  - Resolved question → `mood_valence += 0.08`, `diversive_curiosity -= 0.05` (satisfied).
+  - New question raised → `mood_arousal += 0.05` (exciting). Diversive stays same.
+  - Memory/totem created → `mood_valence += 0.03` (learned something worth keeping).
+  - Boring content → `diversive_curiosity -= 0.02`, `energy -= 0.01`.
+- Remove any existing logic that drains curiosity on journal/memory/content actions.
+
+**Step 5 — Content consumption tracking.** Update `db/content.py`:
+
+- Mark content_pool items as `consumed=True` with `consumed_at` timestamp after read_content.
+- Track what the consumption produced: `consumption_output` JSON field storing which effects fired (memory, totem, thread, EC, resolution).
+- This feeds the Consumption History dashboard panel (TASK-028).
+
+**Step 6 — Conversation integration.** Update `prompt_assembler.py`:
+
+- When visitor is present AND a notification matched the conversation topic (via gap detector topic overlap from TASK-042), add to cortex context:
+
+  ```
+  You noticed something in your feed that connects to your conversation:
+    • "Title" (Source) — relates to what your visitor mentioned about [topic]
+  You can bring this up naturally, or save it for later.
+  ```
+- Add `mention_in_conversation(content_id)` as a variant of read_content that doesn't fetch full content but lets her reference the title/topic in dialogue. Lower energy cost (0.5 vs 1.5).
+
+**Migration:** `migrations/015_consumption_tracking.sql`:
+
+- Add `consumed` BOOLEAN DEFAULT FALSE, `consumed_at` TEXT, `consumption_output` TEXT to content_pool
+
+**Scope (files you may touch):**
+
+- `pipeline/output.py` (reflection processing, drive effects)
+- `prompt_assembler.py` (reflection prompt, conversation integration, mention action)
+- `models/pipeline.py` (CortexOutput reflection fields)
+- `pipeline/action_registry.py` (add mention_in_conversation action)
+- `pipeline/body.py` (add mention_in_conversation handler)
+- `db/content.py` (consumption tracking)
+- `db/memory.py` (if new memory insertion path needed)
+- `migrations/015_consumption_tracking.sql` (new)
+
+**Scope (files you may NOT touch):**
+
+- `pipeline/cortex.py`
+- `pipeline/gap_detector.py`
+- `pipeline/notifications.py`
+- `pipeline/hypothalamus.py` (drive equations set in TASK-043)
+- `heartbeat.py`
+- `heartbeat_server.py`
+- `window/`
+- `sleep.py`
+
+**Tests:**
+
+- `tests/test_reflection.py`:
+  - test_reflection_creates_memory — cortex reflection_memory → memory in DB
+  - test_reflection_creates_totem — relevant_to_visitor → totem weight updated
+  - test_reflection_touches_thread — relevant_to_thread → thread last_activity updated
+  - test_reflection_spawns_ec — reflection_question → new EpistemicCuriosity
+  - test_reflection_resolves_ec — resolves_question → EC marked resolved, mood bump applied
+  - test_resolution_mood_reward — mood_valence increases by 0.08 on resolution
+  - test_boring_content_effects — empty reflection → slight diversive drain + energy cost
+  - test_no_curiosity_drain_on_read — curiosity NEVER decreases from read_content action
+  - test_consumption_tracked — content_pool item marked consumed with outputs
+- `tests/test_conversation_integration.py`:
+  - test_mention_in_conversation — mention action references content without full fetch
+  - test_topic_match_surfaced_in_conversation — matching notification appears in cortex context during engagement
+
+**Definition of done:** Reading content produces genuine output — memories, questions, conversation fuel. Resolving an epistemic curiosity feels rewarding (mood bump). Content is never a drain. She grows from what she reads. Consumption is tracked with outputs for dashboard visibility. She can mention relevant content in conversation naturally.
+
+---
+
+### Curiosity v2 Integration Notes
+
+**Deployment order:** TASK-041 → TASK-042 → TASK-043 → TASK-044. Each builds on the last. Test each phase independently before proceeding.
+
+**Migration sequence:**
+```
+012_notifications.sql    (TASK-041)
+013_gap_detection.sql    (TASK-042)
+014_epistemic_curiosities.sql  (TASK-043)
+015_consumption_tracking.sql   (TASK-044)
+```
+
+**The 48-hour validation test:** After all four phases are deployed, run for 48 hours and check:
+
+1. Are epistemic curiosities forming and resolving? → Query `epistemic_curiosities` table
+2. Is she producing memories/totems from content she read? → Check `consumption_output` JSON
+3. Is she mentioning content in conversations? → Search monologue for content titles
+4. Does diversive curiosity fluctuate naturally (not pinned)? → Check drives_state history
+5. Do journal entries reference things she read? → Search journal entries for content topics
+6. Did visitor speech generate epistemic curiosities? → Check EC `source_type = "visitor"`
+
+**What this replaces:**
+- Single `curiosity` float → `diversive_curiosity` + `epistemic_curiosities` list
+- Timer-based curiosity drift → Stimulus-driven gap spikes
+- "Consume" arbiter cycle type → `read_content` action within any cycle
+- Content as drive drain → Content as generative fuel
+- Pull model (go find content) → Push model (content flows past her)
+
+**Future work (not in these tasks):**
+- **Social curiosity** (spec §7) — visitor-attached questions. Separate spec needed.
+- **Journal gap detection** — her own writing surfaces knowledge gaps during sleep. Fold into sleep.py later.
+- **Monologue question detection** — question-shaped thoughts in idle monologue auto-create ECs. Fold into output.py later.
+- **Dashboard panels** — epistemic curiosity list panel, gap detection visualization. Separate task.
+
+---
+
 ## Completed Tasks
 
 _None yet._
