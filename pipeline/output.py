@@ -43,9 +43,10 @@ ACTION_DRIVE_EFFECTS = {
 }
 
 
-# ── Negative feeling patterns for inhibition signal detection ──
-# These are matched against internal_monologue to detect self-assessed
-# negative outcomes. No LLM call — the cortex already told us.
+# ── Negative feeling patterns (reserved for future use) ──
+# Patterns for detecting self-assessed negative outcomes from cortex monologue.
+# NOT used for inhibition formation — internal self-doubt must not silence
+# creative output. Reserved for a future emotional logging feature.
 NEGATIVE_FEELING_PATTERNS = [
     r"shouldn't have",
     r"regret",
@@ -56,6 +57,20 @@ NEGATIVE_FEELING_PATTERNS = [
     r"felt wrong",
     r"wished I hadn't",
 ]
+
+# ── Inhibition formation guards ──
+# Triggers that must NEVER form inhibitions. All are internal self-doubt signals
+# that fire on normal introspection. Checked in _maybe_form_inhibition so the
+# guard is enforced at the formation site, not only at the call site.
+INHIBITION_BLOCKED_TRIGGERS = {'self_assessment', 'mood_decline', 'repetition'}
+
+# Minimum cycle count before any inhibitions can form.
+# She needs time to establish baselines before learning avoidance.
+INHIBITION_MIN_CYCLE = 100
+
+# Module-level latch: once we've confirmed cycle_count >= INHIBITION_MIN_CYCLE,
+# we skip the DB call on every subsequent cycle.
+_inhibition_guard_cleared: bool = False
 
 
 async def process_output(body_output: BodyOutput, validated: ValidatedOutput,
@@ -345,9 +360,11 @@ async def _inject_reflection_seed(motor_plan: MotorPlan) -> None:
 def _detect_negative_signal(cortex_feelings: str) -> bool:
     """Detect negative outcome signals from cortex internal monologue.
 
-    Internal signals: pattern match on feelings the cortex expressed.
-    External signals (visitor left quickly) require heartbeat.py changes
-    and will be added in a future task.
+    RESERVED — not used for inhibition formation (TASK-054).
+    Internal self-doubt must not silence creative output.
+    Future use: emotional logging, reflection seeds, or wellbeing tracking.
+    External inhibition signals (visitor_displeasure) are wired separately —
+    see future task for heartbeat.py integration.
     """
     for pattern in NEGATIVE_FEELING_PATTERNS:
         if re.search(pattern, cortex_feelings, re.IGNORECASE):
@@ -380,10 +397,19 @@ def _build_inhibition_pattern(decision: ActionDecision) -> str:
 
 async def _update_inhibitions(motor_plan: MotorPlan, body_output: BodyOutput,
                               cortex_feelings: str) -> None:
-    """Check executed actions for negative/positive signals and form/weaken inhibitions."""
-    try:
-        negative = _detect_negative_signal(cortex_feelings)
+    """Check executed actions for positive signals and weaken inhibitions.
 
+    Self-assessment signals (internal doubt) are excluded from inhibition
+    formation — they fire on normal introspection and would silence
+    write_journal and express_thought. Only external signals (visitor_displeasure)
+    form new inhibitions, enforced via INHIBITION_BLOCKED_TRIGGERS in
+    _maybe_form_inhibition. External wiring is a future task.
+
+    Positive signals (write_journal success) always run — existing inhibitions
+    can weaken at any cycle, not just after INHIBITION_MIN_CYCLE. The cycle
+    guard lives inside _maybe_form_inhibition and blocks formation only.
+    """
+    try:
         for action_result in body_output.executed:
             positive = _detect_positive_signal(action_result)
 
@@ -396,17 +422,40 @@ async def _update_inhibitions(motor_plan: MotorPlan, body_output: BodyOutput,
             if not decision:
                 continue
 
-            await _maybe_form_inhibition(decision, negative, positive)
+            # Internal negatives (self_assessment) never form inhibitions —
+            # enforced by INHIBITION_BLOCKED_TRIGGERS inside _maybe_form_inhibition.
+            # Positive signals weaken existing inhibitions regardless of cycle count.
+            await _maybe_form_inhibition(decision, negative=False, positive=positive,
+                                         trigger='internal')
     except Exception as e:
         print(f"  [Inhibition] Error updating inhibitions: {e}")
 
 
 async def _maybe_form_inhibition(decision: ActionDecision,
-                                 negative: bool, positive: bool) -> None:
-    """Form, strengthen, or weaken inhibitions based on signals."""
+                                 negative: bool, positive: bool,
+                                 trigger: str = 'external') -> None:
+    """Form, strengthen, or weaken inhibitions based on signals.
+
+    trigger: label for why the inhibition formed (e.g. 'visitor_displeasure').
+    Triggers in INHIBITION_BLOCKED_TRIGGERS are rejected at the formation site,
+    providing a safety net even if a caller passes negative=True incorrectly.
+
+    Cycle guard (formation only): no new inhibitions before INHIBITION_MIN_CYCLE.
+    Positive weakening always runs — existing inhibitions can decay from cycle 0.
+    """
+    global _inhibition_guard_cleared
     pattern_json = _build_inhibition_pattern(decision)
 
     if negative:
+        # Hard gate: internal self-doubt triggers must never form inhibitions
+        if trigger in INHIBITION_BLOCKED_TRIGGERS:
+            return
+        # Cycle guard: no formation before baseline is established
+        if not _inhibition_guard_cleared:
+            cycle_count = await db.count_cycle_logs()
+            if cycle_count < INHIBITION_MIN_CYCLE:
+                return
+            _inhibition_guard_cleared = True
         existing = await db.find_matching_inhibition(decision.action, pattern_json)
         if existing:
             new_strength = min(existing['strength'] + 0.15, 1.0)
@@ -419,7 +468,7 @@ async def _maybe_form_inhibition(decision: ActionDecision,
             reason_seed = json.dumps({
                 'action': decision.action,
                 'target': decision.target,
-                'trigger': 'self_assessment',
+                'trigger': trigger,
             })
             await db.create_inhibition(
                 action=decision.action,

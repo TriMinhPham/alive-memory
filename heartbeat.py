@@ -379,7 +379,7 @@ class Heartbeat:
                     try:
                         await self._emit_stage('sleep', {'status': 'entering_sleep'})
                         ran = await sleep_cycle()
-                        if ran:
+                        if ran >= 0:
                             self._last_sleep_date = clock.now().date().isoformat()
                             try:
                                 await db.set_setting('last_sleep_date', self._last_sleep_date)
