@@ -8,6 +8,9 @@ export default function BudgetPanel() {
   const [budget, setBudget] = useState<BudgetData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [budgetInput, setBudgetInput] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const fetchBudget = async () => {
     try {
@@ -27,6 +30,34 @@ export default function BudgetPanel() {
     const interval = setInterval(fetchBudget, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  const startEdit = () => {
+    if (budget) {
+      setBudgetInput(String(budget.budget));
+      setEditing(true);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setBudgetInput('');
+  };
+
+  const saveBudget = async () => {
+    const val = parseFloat(budgetInput);
+    if (isNaN(val) || val <= 0) return;
+    setSaving(true);
+    try {
+      const result = await dashboardApi.setBudget(val);
+      setBudget(result);
+      setEditing(false);
+      setBudgetInput('');
+    } catch (err) {
+      console.error('[BudgetPanel] Failed to set budget:', err);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -79,6 +110,48 @@ export default function BudgetPanel() {
           <div className="text-xs font-mono text-neutral-500 mt-1 text-right">
             {(pctRemaining * 100).toFixed(0)}% remaining
           </div>
+        </div>
+
+        {/* Budget cap editor */}
+        <div className="pt-3 border-t border-neutral-700">
+          {editing ? (
+            <div className="flex gap-2">
+              <input
+                type="number"
+                min={0.01}
+                step="0.01"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveBudget();
+                  if (e.key === 'Escape') cancelEdit();
+                }}
+                className="flex-1 px-3 py-1.5 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 font-mono text-sm focus:outline-none focus:border-purple-500"
+                autoFocus
+                disabled={saving}
+              />
+              <button
+                onClick={saveBudget}
+                disabled={saving}
+                className="px-3 py-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-600 text-neutral-200 font-mono text-xs rounded transition-colors"
+              >
+                {saving ? '...' : 'Save'}
+              </button>
+              <button
+                onClick={cancelEdit}
+                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 font-mono text-xs rounded transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={startEdit}
+              className="text-xs font-mono text-neutral-500 hover:text-neutral-300 transition-colors"
+            >
+              Set daily cap
+            </button>
+          )}
         </div>
       </div>
     </div>

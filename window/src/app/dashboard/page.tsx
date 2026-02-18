@@ -95,36 +95,78 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-neutral-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <header className="mb-8">
-          <h1 className="text-3xl font-mono text-neutral-100">
+    <div className="min-h-screen bg-black text-neutral-100 p-4 md:p-6 pb-16">
+      <div className="max-w-7xl mx-auto space-y-10">
+        <header className="mb-2">
+          <h1 className="text-2xl font-mono text-neutral-100">
             Shopkeeper Dashboard
           </h1>
-          <p className="text-sm font-mono text-neutral-400 mt-2">
-            Live operator view · Real-time monitoring
+          <p className="text-xs font-mono text-neutral-500 mt-1">
+            Live operator view
           </p>
         </header>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <VitalsPanel />
-          <DrivesPanel />
-          <BodyPanel />
-          <BehavioralPanel />
-          <XDraftsPanel />
-          <CostsPanel />
-          <BudgetPanel />
-          <ThreadsPanel />
-          <PoolPanel />
-          <CollectionPanel />
-          <ContentPoolPanel />
-          <FeedPanel />
-          <ConsumptionHistoryPanel />
-          <ParametersPanel />
-          <ActionsPanel />
-          <TimelinePanel />
-          <ControlsPanel />
-        </div>
+        {/* ── Status ── */}
+        <section>
+          <h2 className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-3 border-b border-neutral-800 pb-2">
+            Status
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <VitalsPanel />
+            <DrivesPanel />
+            <BodyPanel />
+          </div>
+        </section>
+
+        {/* ── Behavior ── */}
+        <section>
+          <h2 className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-3 border-b border-neutral-800 pb-2">
+            Behavior
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <BehavioralPanel />
+            <CostsPanel />
+            <BudgetPanel />
+          </div>
+        </section>
+
+        {/* ── Social ── */}
+        <section>
+          <h2 className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-3 border-b border-neutral-800 pb-2">
+            Social
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <XDraftsPanel />
+            <ThreadsPanel />
+          </div>
+        </section>
+
+        {/* ── Content ── */}
+        <section>
+          <h2 className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-3 border-b border-neutral-800 pb-2">
+            Content
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <PoolPanel />
+            <CollectionPanel />
+            <ContentPoolPanel />
+            <FeedPanel />
+            <ConsumptionHistoryPanel />
+          </div>
+        </section>
+
+        {/* ── System ── */}
+        <section>
+          <h2 className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-3 border-b border-neutral-800 pb-2">
+            System
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <ParametersPanel />
+            <ActionsPanel />
+            <TimelinePanel />
+            <ControlsPanel />
+          </div>
+        </section>
       </div>
     </div>
   );

@@ -62,6 +62,7 @@ export default function CostsPanel() {
   }
 
   const { summary } = costs;
+  // TODO [TASK-031]: costs.daily contains 30-day daily breakdown — add trend chart
 
   return (
     <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-6">

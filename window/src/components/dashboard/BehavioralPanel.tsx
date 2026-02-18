@@ -56,9 +56,9 @@ function ContextBadges({ raw }: { raw: string }) {
   const badges = parseBadges(raw);
   if (badges.length === 0) return null;
   return (
-    <span className="inline-flex gap-1 ml-1.5" title={raw}>
+    <span className="inline-flex flex-wrap gap-1 ml-1.5" title={raw}>
       {badges.map((b, i) => (
-        <span key={i} className={`px-1 py-0 rounded text-[10px] leading-4 ${b.color}`}>
+        <span key={i} className={`px-1.5 py-0.5 rounded text-[10px] leading-3 whitespace-nowrap ${b.color}`}>
           {b.label}
         </span>
       ))}
@@ -146,12 +146,10 @@ export default function BehavioralPanel() {
         ) : (
           <div className="space-y-2">
             {data.habits.map((h, i) => (
-              <div key={i} className="flex items-center justify-between text-xs font-mono gap-2" title={h.trigger_context}>
-                <div className="flex items-center flex-1 min-w-0">
-                  <span className="text-neutral-300 shrink-0">{h.action}</span>
-                  <ContextBadges raw={h.trigger_context} />
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
+              <div key={i} className="flex flex-wrap items-center text-xs font-mono gap-x-2 gap-y-1" title={h.trigger_context}>
+                <span className="text-neutral-300 shrink-0">{h.action}</span>
+                <ContextBadges raw={h.trigger_context} />
+                <div className="flex items-center gap-2 ml-auto shrink-0">
                   <StrengthBar value={h.strength} />
                   <span className="text-neutral-500 w-8 text-right">{h.fire_count}x</span>
                 </div>
