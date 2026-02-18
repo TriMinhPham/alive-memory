@@ -365,16 +365,20 @@ async def _execute_single_action(action: ActionRequest, visitor_id: str,
         elif '_body_state_update' in detail:
             import json
             state_update = json.loads(detail['_body_state_update'])
-            await db.append_event(Event(
-                event_type='action_body',
-                source='self',
-                payload=state_update,
-            ))
-            result.payload = state_update
-            if 'body_state' in state_update:
-                result.payload['body_state_update'] = state_update['body_state']
-            result.side_effects.append('body_state_updated')
-            result.success = True
+            if not isinstance(state_update, dict):
+                result.success = False
+                result.error = 'body_state_update must be a JSON object'
+            else:
+                await db.append_event(Event(
+                    event_type='action_body',
+                    source='self',
+                    payload=state_update,
+                ))
+                result.payload = state_update
+                if 'body_state' in state_update:
+                    result.payload['body_state_update'] = state_update['body_state']
+                result.side_effects.append('body_state_updated')
+                result.success = True
 
     except Exception as e:
         result.success = False

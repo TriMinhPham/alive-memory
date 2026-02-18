@@ -644,9 +644,14 @@ async def handle_resolve_action(server, writer: asyncio.StreamWriter,
     if status == 'alias' and not data.get('alias_for'):
         await server._http_json(writer, 400, {'error': 'alias_for required when status is alias'})
         return
-    if status == 'body_state' and not data.get('body_state'):
-        await server._http_json(writer, 400, {'error': 'body_state required when status is body_state'})
-        return
+    if status == 'body_state':
+        bs = data.get('body_state')
+        if not bs:
+            await server._http_json(writer, 400, {'error': 'body_state required when status is body_state'})
+            return
+        if not isinstance(bs, dict):
+            await server._http_json(writer, 400, {'error': 'body_state must be a JSON object'})
+            return
 
     # Verify the action exists before attempting to resolve
     existing = await db.get_dynamic_action(action_name)
