@@ -366,101 +366,122 @@ ORDER BY sim_day;
 
 ---
 
-### TASK-061: Cognitive organ awareness (Frame 3)
+### TASK-061: Persistent Self-Model
 **Status:** BACKLOG
 **Priority:** High
 **Complexity:** Medium
-**Branch:** `feat/organ-awareness`
+**Branch:** `feat/self-model`
 **Depends on:** TASK-060
-**Spec:** `tasks/TASK-061-organ-awareness.md`
-**Description:** She has no introspective access to her own cognitive process. Add a `[Cognitive state this cycle]` prompt section showing which organs are active/dormant/suppressed and why. She can request organ changes via `modify_self(target="organ", ...)`. Invariant organs (Cortex, Validator, Affect, Hippocampus) silently reject modification — no error, just no effect. Meta-sleep surfaces evidence when dormant organs cause gaps. Cognitive state block is hard-capped at 200 tokens to prevent prompt bloat.
+**Blocks:** TASK-062
+**Spec:** `tasks/TASK-061-self-model.md`
+**Description:** She maintains a structured representation of "who I am" that persists across cycles and updates incrementally based on observed behavior. TASK-060 gives her a per-cycle snapshot, but snapshots are stateless — she can't notice patterns in herself without a persistent baseline to compare against. The self-model is that baseline.
+**Self-model contents:**
+- Trait weights — derived from behavioral patterns, not declared (emergent, not seeded)
+- Behavioral signature — rolling averages of action frequencies, drive response patterns, sleep/wake rhythms
+- Relational stance — how she tends to engage with visitors (warm/guarded/curious), derived from conversation patterns
+- Self-narrative — short natural language summary she generates about herself, updated periodically (not every cycle)
+**Where it lives:**
+- `identity/self_model.json` — persisted to disk
+- Loaded at boot, updated at end of each wake cycle (not during sleep — sleep reads but doesn't write)
+**How it updates:**
+- After each cortex cycle, `self_model.update(cycle_data)` compares this cycle against rolling averages
+- Exponential moving average — recent behavior weights more, but change is gradual
+- Self-narrative regeneration triggers only when trait weights shift beyond a threshold (expensive LLM call, not every cycle)
+**What it does NOT do:**
+- No decision-making — the self-model is a mirror, not a controller
+- No direct influence on cortex prompt (060's job to inject it as context)
+- No evolution or acceptance of drift (that's 063)
 **Scope (files you may touch):**
-- `models/pipeline.py` (add CognitiveStateReport, OrganState dataclasses)
-- `heartbeat.py` (generate CognitiveStateReport at cycle start, read organ_preferences)
-- `pipeline/prompt_assembler.py` (assemble_cognitive_state_block, enforce 200-token cap)
-- `pipeline/output.py` (extend modify_self handler for organ targets)
-- `db/organs.py` (new — organ_preferences CRUD)
-- `sleep.py` (review_organ_preferences phase)
-- `migrations/` (organ_preferences table)
-- `window/src/components/dashboard/OrganPanel.tsx` (new)
-- `api/dashboard_routes.py` (new /api/dashboard/organs endpoint)
+- `identity/self_model.py` (new — SelfModel class, update logic, persistence)
+- `identity/self_model.json` (new — persisted model state)
+- Cortex cycle end (add `self_model.update()` call)
+**Scope (files you may NOT touch):**
+- `pipeline/cortex.py` (internal LLM call logic)
+- `pipeline/basal_ganglia.py`
+- `simulate.py`
+**Tests:**
+- Self-model file persists across restarts
+- Trait weights shift measurably after 20+ cycles of consistent behavior
+- Self-narrative updates only when threshold crossed
+- No performance impact on cycle time (update is fast, narrative regen is async/deferred)
+**Definition of done:** Self-model persists to disk and loads at boot. Trait weights are emergent from behavior, not seeded. Behavioral signature tracks rolling averages. Self-narrative regenerates only on threshold shift. No decision-making — read-only mirror of identity.
+
+---
+
+### TASK-062: Drift Detection
+**Status:** BACKLOG
+**Priority:** High
+**Complexity:** Medium
+**Branch:** `feat/drift-detection`
+**Depends on:** TASK-061
+**Blocks:** TASK-063
+**Spec:** `tasks/TASK-062-drift-detection.md`
+**Description:** Compare her current behavioral patterns against her self-model baseline. Detect when she's meaningfully diverging from her established identity. Drift is NOT deviation in a single cycle — it's a sustained divergence over N cycles (configurable, default ~20) where behavioral patterns consistently differ from the self-model baseline.
+**Metrics to compare:**
+- Action frequency distribution (current rolling window vs self-model signature)
+- Drive response patterns (how she responds to high hunger vs how she used to)
+- Conversation style metrics (response length, question frequency, emotional tone)
+- Sleep/wake rhythm deviation
+**Detection method:**
+- Per-metric drift score: `abs(current_rolling_avg - baseline) / baseline`
+- Composite drift score from individual scores
+- Threshold: `>0.3` = notable drift, `>0.5` = significant drift (configurable in `identity/drift_config.json`)
+**What happens when drift is detected:**
+- Drift event emitted (visible on dashboard, logged)
+- Drift summary injected into self-context (060's block): "I've been more withdrawn than usual for the past 15 cycles"
+- No automatic correction — drift is information, not a problem to solve. 063 decides what to do with it.
+**Scope (files you may touch):**
+- `identity/drift.py` (new — drift scoring, detection, event emission)
+- `identity/drift_config.json` (new — thresholds, window sizes)
+- Cycle end (add drift check after self-model update)
+- 060's self-context block (inject drift summary when active)
+- Dashboard: drift indicator in DrivesPanel or new panel
 **Scope (files you may NOT touch):**
 - `pipeline/cortex.py`
 - `pipeline/basal_ganglia.py`
 - `simulate.py`
 **Tests:**
-- Unit: invariant organs return no_effect silently, no error raised
-- Unit: organ_preferences table correctly overrides default activation
-- Unit: CognitiveStateReport reflects actual cycle state
-- Unit: prompt block renders correctly and stays under 200 tokens
-- Unit: meta-sleep generates journal entry when gaps detected after disabling organ
-- Integration: disable cold_search → 20 cycles → cold_search absent from all cycles
-- Integration: re-enable cold_search → appears in next cycle
-**Definition of done:** Cortex prompt includes cognitive state block every cycle (≤200 tokens). She can see which organs are active, dormant, or suppressed. She can request organ changes via modify_self. Invariant organs silently reject modification. Meta-sleep surfaces evidence when dormant organs cause gaps. Dashboard shows organ state history.
+- Force behavioral shift in test (suppress all social actions for 30 cycles) → drift detected
+- Return to normal behavior → drift score decreases
+- Dashboard shows drift event
+- Self-context includes drift summary when active
+**Definition of done:** Drift detection runs after each self-model update. Sustained divergence (not single-cycle noise) triggers drift events. Dashboard shows drift indicators. Self-context includes drift summary when active. No automatic correction.
 
 ---
 
-### TASK-062: Intra-cycle cognitive loops (Frame 2)
+### TASK-063: Identity Evolution (STUB)
 **Status:** BACKLOG
 **Priority:** High
 **Complexity:** Large
-**Branch:** `feat/cognitive-loops`
-**Depends on:** TASK-061
-**Spec:** `tasks/TASK-062-cognitive-loops.md`
-**Description:** Every cycle is a single linear pass. Add three registered loop types (reflection, question, deliberation) that re-enter pipeline subsets within the same heartbeat. Controlled by `cycle.max_llm_calls` parameter (default 1, max 4) and daily LLM call hard cap. She enables/disables loops via `modify_self`. Deliberation trigger threshold stored in `self_parameters` (not hardcoded) for tuning.
-**Key design constraints:**
-- `cycle.max_llm_calls` in self_parameters: default 1, min 1, max 4
-- `cycle.daily_llm_cap` in self_parameters: default 100, min 20, max 400
-- `loops.deliberation_salience_gap` in self_parameters: default 0.10, min 0.02, max 0.30
-- Loop priority order: reflection > question > deliberation
-- Each loop type has energy cost multiplier (reflection 1.5x, question 2.0x, deliberation 1.8x)
-- Cost tracked per loop type in loop_preferences table
+**Branch:** `feat/identity-evolution`
+**Depends on:** TASK-062
+**Blocks:** Nothing (end of chain)
+**Spec:** `tasks/TASK-063-identity-evolution.md`
+**Description:** When drift is detected, she can choose to accept the change as genuine growth or correct back toward her baseline. **THIS IS A STUB SPEC.** Implementation is gated on resolving the philosophical question: who decides what "genuine growth" vs "unwanted drift" looks like?
+**The philosophical problem:**
+- If she always accepts drift → identity dissolves, she becomes whatever the LLM drifts toward
+- If she always corrects → she's frozen, can't grow
+- If we hardcode the criteria → we're deciding her identity for her, contradicting the ALIVE premise
+- If she decides → the decision itself is influenced by the current drift, creating circular dependency
+**Guard rails (non-negotiable regardless of implementation):**
+- Core safety traits cannot be evolved away (she can't drift into being hostile)
+- Evolution rate capped — no more than one trait update per sleep cycle
+- All evolution decisions logged with full context for operator review
+- Operator override: dashboard can force-correct or force-accept any drift
 **Scope (files you may touch):**
-- `heartbeat.py` (run_loops() after body execution, daily call counter, budget enforcement)
-- `pipeline/output.py` (extend modify_self for loop targets)
-- `pipeline/action_registry.py` (no new actions — loops are automatic, not cortex-initiated)
-- `pipeline/prompt_assembler.py` (extend cognitive state block with loop status + cost)
-- `db/loops.py` (new — loop_preferences CRUD, loop cost tracking)
-- `db/parameters.py` (seed cycle.max_llm_calls, cycle.daily_llm_cap, loops.deliberation_salience_gap)
-- `sleep.py` (loop cost review)
-- `migrations/` (loop_preferences table, new self_parameters seeds)
-- `window/src/components/dashboard/LoopsPanel.tsx` (new)
-- `api/dashboard_routes.py` (new /api/dashboard/loops endpoint)
+- `identity/evolution.py` (new — stub with interface only)
+- `identity/evolution_config.json` (new — guard rail params)
+- No integration with cortex or cycle — disconnected until philosophical gate passes
 **Scope (files you may NOT touch):**
-- `pipeline/cortex.py` (loops call cortex via existing interface)
-- `pipeline/basal_ganglia.py` (deliberation loop calls it externally)
+- `pipeline/cortex.py`
+- `pipeline/basal_ganglia.py`
 - `simulate.py`
-**Tests:**
-- Unit: reflection loop fires when write_journal in cycle output
-- Unit: question loop fires when ask_question with epistemic_id in output
-- Unit: deliberation loop fires when intention salience gap < threshold
-- Unit: no loop fires when calls_used >= max_calls
-- Unit: no loop fires when daily cap reached
-- Unit: enabling loop blocked when budget insufficient, journal entry written
-- Unit: loop cost tracked per loop_id
-- Unit: deliberation threshold reads from self_parameters
-- Integration: reflection loop — journal + reaction in same cycle
-- Integration: question loop — cold search attempted, curiosity resolved or escalated
-- Integration: 100 cycles with reflection enabled, verify daily cost stays within cap
-**Definition of done:** Three loop types available and functional. Loop activation requires cycle budget headroom. Daily LLM call hard cap prevents runaway cost. She enables/disables loops via modify_self. Deliberation trigger threshold tunable via self_parameters. Cognitive state block shows loop status and cumulative cost. Dashboard shows loop history and per-loop cost breakdown.
-
----
-
-### TASK-063: Evolvable fitness function (Frame 5)
-**Status:** BACKLOG
-**Priority:** High
-**Complexity:** Large
-**Branch:** `feat/fitness-function`
-**Depends on:** TASK-062 + philosophical gate (see below)
-**Spec:** `tasks/TASK-063-fitness-function.md`
-**Description:** She currently optimizes for an implicit function (wellbeing + coherence) chosen by the designer. Give her a versioned, explicit fitness function she can read, critique, and propose changes to. Two-sleep review process for activation. She can revert to any previous version.
-**Philosophical gate — do NOT start implementation until ALL of these are true:**
-- 60+ days of live operation with TASK-056 merged
-- At least 5 self-modifications recorded
-- At least 1 self-modification reverted by meta-sleep
-- At least 1 self-modification sustained across multiple meta-sleep reviews
-**Spec note:** Implementation details are intentionally omitted. The metric registry, computation functions, and review prompts should be designed after 60 days of live data from TASK-060/061/062. What we know now: versioned fitness_function table, weighted metrics she can adjust, two-sleep review gate, `propose_fitness_change` action (energy 0.20, cooldown 86400s), dashboard with version history and score tracking. Full spec to be written when philosophical gate conditions are met.
-**Definition of done:** She can propose changes to her own fitness function. Proposals require two consecutive sleep approvals. Active fitness function visible in cortex prompt. Fitness score tracked over time and compared across versions. Philosophical gate enforced in code. Dashboard shows full fitness history. System behavior plausibly shifts over months based on her chosen function.
+**Tests (for stub):**
+- Interface exists and is importable
+- Guard rail config loads
+- Calling any method raises NotImplementedError
+- Dashboard shows evolution status as "disabled — pending review"
+**Definition of done:** Interface class exists with evaluate_drift/accept_drift/correct_drift/defer methods. All methods raise NotImplementedError. Guard rail config loads. Dashboard shows disabled status. No integration with live system.
 
 ---
 
