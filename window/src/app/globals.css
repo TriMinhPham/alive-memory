@@ -44,11 +44,15 @@
   --stream-mask: linear-gradient(to bottom, transparent 0%, black 25%, black 100%);
 
   /* ─── Text Opacity (by fragment type) ─── */
-  --text-thought: rgba(230,215,185, 0.55);
-  --text-journal: rgba(220,200,170, 0.70);
-  --text-action:  rgba(190,170,140, 0.38);
-  --text-speech:  rgba(240,225,195, 0.85);
-  --text-sleep:   rgba(140,150,180, 0.40);
+  --text-thought: rgba(230,215,185, 0.88);
+  --text-journal: rgba(220,200,170, 0.85);
+  --text-action:  rgba(190,170,140, 0.60);
+  --text-speech:  rgba(240,225,195, 0.92);
+  --text-sleep:   rgba(140,150,180, 0.65);
+
+  /* ─── Fragment Container ─── */
+  --fragment-bg: rgba(8,6,4, 0.55);
+  --fragment-border: rgba(201,169,110, 0.08);
 
   /* ─── Timing ─── */
   --enter-button-delay: 10s;
@@ -70,6 +74,10 @@ html, body {
   font-family: 'DM Sans', 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Visitor window: immersive full-viewport lock (only when .window-viewport present) */
+body:has(.window-viewport) {
   overflow: hidden;
   height: 100%;
   width: 100%;
@@ -213,14 +221,23 @@ html, body {
   pointer-events: none;
   -webkit-mask-image: var(--stream-mask);
   mask-image: var(--stream-mask);
-  display: flex; flex-direction: column-reverse; gap: 0.65rem;
-  max-height: 35vh; overflow: hidden;
+  display: flex; flex-direction: column-reverse; gap: 0.5rem;
+  max-height: 40vh; overflow-y: auto; overflow-x: hidden;
+  scrollbar-width: none;
 }
+.activity-stream::-webkit-scrollbar { display: none; }
 
 .fragment {
   font-family: 'Cormorant Garamond', 'Georgia', serif;
   font-size: 0.95rem; line-height: 1.55;
   animation: fragment-in var(--fragment-animate-in) ease-out both;
+  background: var(--fragment-bg);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--fragment-border);
+  border-radius: 3px;
+  padding: 0.5rem 0.7rem;
+  word-wrap: break-word; overflow-wrap: break-word;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
 
 @keyframes fragment-in {

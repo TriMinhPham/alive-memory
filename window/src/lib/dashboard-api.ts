@@ -123,6 +123,15 @@ export const dashboardApi = {
     return res.json();
   },
 
+  async setBudget(dailyBudget: number) {
+    const res = await dashboardFetch('/api/dashboard/budget', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ daily_budget: dailyBudget }),
+    });
+    return res.json();
+  },
+
   async getBehavioral() {
     const res = await dashboardFetch('/api/dashboard/behavioral');
     return res.json();

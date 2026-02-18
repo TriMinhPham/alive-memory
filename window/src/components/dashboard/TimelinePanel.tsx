@@ -11,6 +11,7 @@ interface TimelineEvent {
   payload: any;
 }
 
+// TODO [TASK-030]: event.payload is fetched but not displayed — add expandable detail view
 export default function TimelinePanel() {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);

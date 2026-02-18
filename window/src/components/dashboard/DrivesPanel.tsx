@@ -73,7 +73,14 @@ export default function DrivesPanel() {
 
   return (
     <div className="bg-neutral-900 border border-neutral-700 rounded-lg p-6">
-      <h2 className="text-lg font-mono text-neutral-300 mb-4">Drives</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-mono text-neutral-300">Drives</h2>
+        {drives.updated_at && (
+          <span className="text-xs font-mono text-neutral-600">
+            {new Date(drives.updated_at).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
       <div className="space-y-3">
         <DriveBar label="Social Hunger" value={drives.social_hunger} color="bg-blue-500" />
         <DriveBar label="Curiosity" value={drives.curiosity} color="bg-purple-500" />
