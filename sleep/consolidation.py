@@ -36,11 +36,20 @@ async def run_consolidation() -> int:
         # Quiet day — write minimal entry if no summary exists yet
         existing_summary = await db.get_daily_summary_for_today()
         if not existing_summary:
+            _quiet_text = "Nothing happened today. The shop was quiet. I existed."
             await db.insert_journal(
-                content="Nothing happened today. The shop was quiet. I existed.",
+                content=_quiet_text,
                 mood='still',
                 tags=['daily', 'sleep_cycle', 'quiet_day'],
             )
+            # MD write — quiet day journal
+            try:
+                from memory_writer import get_memory_writer
+                writer = get_memory_writer()
+                await writer.append_journal(_quiet_text, mood_desc='still',
+                                            tags=['daily', 'quiet_day'])
+            except Exception as e:
+                print(f"  [Memory] MD quiet day write failed: {e}")
             await write_daily_summary([], [], [])
         await reset_drives_for_morning()
         await flush_day_memory()
@@ -91,6 +100,17 @@ async def run_consolidation() -> int:
                         tags=['sleep_reflection', moment.moment_type] + (moment.tags or []),
                     )
                     journal_entry_ids.append(journal_id)
+                    # MD write — conscious reflection
+                    try:
+                        from memory_writer import get_memory_writer
+                        from memory_translator import scrub_numbers
+                        import clock as _clock
+                        writer = get_memory_writer()
+                        date_str = _clock.now().strftime('%Y-%m-%d')
+                        await writer.append_reflection(date_str, 'night',
+                                                        scrub_numbers(reflection_text))
+                    except Exception as e:
+                        print(f"  [Memory] MD reflection write failed: {e}")
                 for update in reflection.get('memory_updates', []):
                     await hippocampus_consolidate(update, moment.visitor_id)
                 await db.mark_day_memory_processed(moment.id)

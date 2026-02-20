@@ -44,6 +44,9 @@ async def run_wake_transition() -> None:
     # 9. Flush processed day memory + stale cleanup
     await _pkg.flush_day_memory()
 
+    # 10. Update conscious self-memory files
+    await _update_self_memory_files()
+
 
 async def reset_drives_for_morning():
     """Reset drives to morning defaults."""
@@ -101,3 +104,27 @@ async def cleanup_content_pool():
     from config.feeds import MAX_POOL_UNSEEN
     await db.expire_pool_items()
     await db.cap_unseen_pool(max_unseen=MAX_POOL_UNSEEN)
+
+
+async def _update_self_memory_files():
+    """Update conscious self-knowledge files during wake transition.
+
+    Reads identity narrative from self-discoveries in DB,
+    translates to natural language, and writes to self/ MD files.
+    """
+    try:
+        from memory_writer import get_memory_writer
+        from memory_translator import scrub_numbers
+        writer = get_memory_writer()
+
+        # Identity file — self-discoveries as narrative
+        try:
+            discoveries_text = await db.get_self_discoveries()
+            if discoveries_text:
+                content = f"# Who I Am\n\n{scrub_numbers(discoveries_text)}\n"
+                await writer.write_self_file('identity.md', content)
+        except Exception as e:
+            print(f"  [Memory] Self identity write failed: {e}")
+
+    except Exception as e:
+        print(f"  [Memory] Self memory files update failed: {e}")

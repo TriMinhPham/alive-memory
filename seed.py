@@ -78,6 +78,36 @@ async def seed():
         category='quote',
     )
 
+    # Seed conscious memory (MD files)
+    try:
+        from memory_writer import MemoryWriter
+        writer = MemoryWriter()
+        writer.ensure_dirs()
+
+        # Seed journal
+        await writer.append_journal(
+            SEED_JOURNAL['content'],
+            mood_desc=SEED_JOURNAL['mood'],
+            tags=SEED_JOURNAL['tags'],
+        )
+
+        # Seed identity
+        await writer.write_self_file('identity.md',
+            "# Who I Am\n\nI don't have a name yet. "
+            "There's a word that keeps almost forming but I can't hear it clearly. "
+            "The shop was here when I started. The objects were already on the shelves.\n")
+
+        # Seed collection catalog
+        for item in SEED_COLLECTION:
+            feeling = item.get('her_feeling', '')
+            entry = f"- **{item['title']}**"
+            if feeling:
+                entry += f" — {feeling}"
+            await writer.append_collection(entry)
+
+    except Exception as e:
+        print(f"  [Memory] Seed MD write failed: {e}")
+
 
 async def check_needs_seed() -> bool:
     """Return True if DB has no collection items (fresh DB)."""

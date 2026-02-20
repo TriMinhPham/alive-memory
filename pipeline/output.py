@@ -172,8 +172,18 @@ async def process_output(body_output: BodyOutput, validated: ValidatedOutput,
                 # Diminishing mood bonus (TASK-036): emotional habituation
                 # First 10 actions: near-full bonus. After 30: ~0.005.
                 actions_today_count = await db.get_executed_action_count_today()
-                for _ in successes:
+                for s in successes:
                     bonus = p('output.drives.success_bonus_base') / (1 + actions_today_count / p('output.drives.success_habituation_divisor'))
+                    # HOTFIX-002: Recovery boost when at extreme negative valence.
+                    # Doing things feels slightly better than doing nothing —
+                    # this is the circuit breaker that escapes the death spiral.
+                    if drives.mood_valence < -0.5:
+                        bonus = max(bonus, 0.05)
+                        # Substantive dialogue: extra boost (real conversation)
+                        if s.action in ('speak', 'dialogue') and not (
+                            hasattr(s, 'payload') and s.payload.get('trivial')
+                        ):
+                            bonus += 0.05
                     drives.mood_valence = min(1.0, drives.mood_valence + bonus)
                     actions_today_count += 1  # each success in this batch counts
                 drives_changed = True
@@ -210,6 +220,9 @@ async def process_output(body_output: BodyOutput, validated: ValidatedOutput,
             drives_changed = True
 
         if drives_changed:
+            # HOTFIX-002: Enforce hard floor on valence — never go catatonic
+            from pipeline.hypothalamus import VALENCE_HARD_FLOOR
+            drives.mood_valence = max(drives.mood_valence, VALENCE_HARD_FLOOR)
             await db.save_drives_state(drives)
             print(f"  [Output] Drives saved: soc={drives.social_hunger:.2f} "
                   f"cur={drives.curiosity:.2f} exp={drives.expression_need:.2f} "
@@ -740,6 +753,16 @@ async def _emit_internal_conflict(consistency: SelfConsistencyResult,
             },
         ))
         print(f"  [Metacognitive] Internal conflict detected: {conflict_desc}")
+        # MD write — translate conflict to felt experience
+        try:
+            from memory_writer import get_memory_writer
+            from memory_translator import translate_internal_conflict
+            writer = get_memory_writer()
+            felt = translate_internal_conflict(consistency.conflicts)
+            if felt:
+                await writer.append_journal(felt, tags=['internal_conflict'])
+        except Exception as e2:
+            print(f"  [Memory] MD conflict write failed: {e2}")
     except Exception as e:
         print(f"  [Metacognitive] Failed to emit conflict: {e}")
 

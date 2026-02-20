@@ -74,6 +74,19 @@ async def execute_browse_web(action: ActionRequest, visitor_id: str = None,
     except Exception as e:
         print(f"  [BrowseWeb] Failed to insert pool item: {e}")
 
+    # MD write — conscious browse memory
+    try:
+        import re as _re
+        from memory_writer import get_memory_writer
+        from memory_translator import scrub_numbers
+        writer = get_memory_writer()
+        slug = _re.sub(r'[^a-z0-9]+', '-', query.lower()).strip('-')[:50]
+        date = clock.now().strftime('%Y-%m-%d')
+        await writer.append_browse(date, slug,
+            f"# Web search: {query}\n\n{scrub_numbers(result_text[:2000])}\n")
+    except Exception as e:
+        print(f"  [Memory] MD browse write failed: {e}")
+
     # Emit event
     from models.event import Event
     await db.append_event(Event(
