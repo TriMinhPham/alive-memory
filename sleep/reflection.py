@@ -112,15 +112,32 @@ async def write_daily_summary(moments: list, reflections: list,
     today_jst = clock.now().date().isoformat()
     moment_ids = [m.id for m in moments]
 
+    emotional_arc = compute_emotional_arc_from_moments(moments)
+    notable_totems = extract_totems_from_reflections(reflections)
+
     await db.insert_daily_summary({
         'day_number': days_alive,
         'date': today_jst,
         'moment_count': len(moments),
         'moment_ids': moment_ids,
         'journal_entry_ids': journal_entry_ids,
-        'emotional_arc': compute_emotional_arc_from_moments(moments),
-        'notable_totems': extract_totems_from_reflections(reflections),
+        'emotional_arc': emotional_arc,
+        'notable_totems': notable_totems,
     })
+
+    # MD write — daily summary reflection
+    try:
+        from memory_writer import get_memory_writer
+        writer = get_memory_writer()
+        summary_parts = [f"Day {days_alive}. {len(moments)} moments."]
+        if emotional_arc and emotional_arc != 'quiet':
+            summary_parts.append(f"The day felt like: {emotional_arc}.")
+        if notable_totems:
+            summary_parts.append(f"Names that came up: {', '.join(notable_totems[:5])}.")
+        await writer.append_reflection(today_jst, 'summary',
+                                        ' '.join(summary_parts))
+    except Exception as e:
+        print(f"  [Memory] MD daily summary write failed: {e}")
 
 
 def compute_emotional_arc_from_moments(moments: list) -> str:

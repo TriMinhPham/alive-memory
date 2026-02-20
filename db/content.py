@@ -141,6 +141,37 @@ async def archive_stale_threads(older_than_days: int = 7) -> int:
     return cursor.rowcount
 
 
+async def get_open_threads() -> list[Thread]:
+    """Get all open/active threads (no limit). For dedup checks."""
+    conn = await _connection.get_db()
+    cursor = await conn.execute(
+        """SELECT * FROM threads
+           WHERE status IN ('open', 'active')
+           ORDER BY last_touched DESC"""
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_thread(r) for r in rows]
+
+
+async def append_to_thread(thread_id: str, content: str):
+    """Append content to an existing thread's content field."""
+    conn = await _connection.get_db()
+    now = clock.now_utc().isoformat()
+    cursor = await conn.execute(
+        "SELECT content FROM threads WHERE id = ?", (thread_id,)
+    )
+    row = await cursor.fetchone()
+    if row:
+        existing = row['content'] or ''
+        new_content = f"{existing}\n{content}".strip() if existing else content
+        await _connection._exec_write(
+            """UPDATE threads SET content = ?, last_touched = ?,
+               touch_count = touch_count + 1, touch_reason = 'dedup_merge'
+               WHERE id = ?""",
+            (new_content, now, thread_id)
+        )
+
+
 async def get_thread_count_by_status() -> dict:
     """Get thread counts by status. For peek command and sleep digest."""
     conn = await _connection.get_db()

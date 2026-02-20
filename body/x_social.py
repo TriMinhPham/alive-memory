@@ -17,6 +17,14 @@ from body.rate_limiter import check_rate_limit, record_action, is_channel_enable
 import db
 
 
+class RateLimitError(Exception):
+    """Raised when X API returns 429 — carries retry_after hint."""
+
+    def __init__(self, retry_after: int = 900):
+        self.retry_after = retry_after
+        super().__init__(f"Rate limited, retry after {retry_after}s")
+
+
 @register('post_x')
 async def execute_post_x(action: ActionRequest, visitor_id: str = None,
                          monologue: str = '') -> ActionResult:
@@ -180,23 +188,29 @@ async def reply_to_visitor(visitor_id: str, text: str) -> dict:
 class XMentionPoller:
     """Background task that polls X for mentions and injects them as events."""
 
-    def __init__(self, poll_interval: int = 120):
+    def __init__(self, poll_interval: int = 900):
         self.poll_interval = poll_interval
+        self._current_interval = self.poll_interval
         self._running = False
         self._since_id = None
 
     async def start_polling(self):
-        """Background loop: fetch mentions every poll_interval seconds."""
+        """Background loop: fetch mentions with exponential backoff on errors."""
         self._running = True
         print(f"  [XMentions] Polling started (every {self.poll_interval}s)")
 
         while self._running:
             try:
                 await self._poll_once()
+                self._current_interval = self.poll_interval  # reset on success
+            except RateLimitError as e:
+                self._current_interval = min(e.retry_after * 2, 3600)
+                print(f"  [XMentions] Rate limited, backing off to {self._current_interval}s")
             except Exception as e:
-                print(f"  [XMentions] Poll error: {type(e).__name__}: {e}")
+                self._current_interval = min(self._current_interval * 2, 3600)
+                print(f"  [XMentions] Poll error: {type(e).__name__}: {e}, backing off to {self._current_interval}s")
 
-            await asyncio.sleep(self.poll_interval)
+            await asyncio.sleep(self._current_interval)
 
     def stop(self):
         self._running = False
@@ -206,7 +220,21 @@ class XMentionPoller:
         """Fetch mentions and inject as visitor events."""
         from body.x_client import fetch_mentions
 
-        mentions = await fetch_mentions(since_id=self._since_id)
+        try:
+            mentions = await fetch_mentions(since_id=self._since_id)
+        except Exception as e:
+            # Convert tweepy rate limit errors to our RateLimitError
+            try:
+                import tweepy
+                if isinstance(e, tweepy.TooManyRequests):
+                    response = getattr(e, 'response', None)
+                    retry_after = 900
+                    if response is not None:
+                        retry_after = int(response.headers.get('Retry-After', 900))
+                    raise RateLimitError(retry_after=retry_after) from e
+            except ImportError:
+                pass
+            raise
         if not mentions:
             return
 

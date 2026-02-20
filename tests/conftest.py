@@ -1,8 +1,10 @@
 """Shared fixtures for the shopkeeper test suite."""
 
 import asyncio
-import sys
+import atexit
 import os
+import sys
+import threading
 
 import pytest
 
@@ -10,6 +12,38 @@ from models.pipeline import CortexOutput, ValidatorState
 
 # Add project root to path so tests can import modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+# ── Fix aiosqlite hang on exit ──
+# aiosqlite spawns a daemon thread per connection.  If any connection leaks
+# (or close() doesn't fully join the thread), the process hangs for 30-60s
+# after all tests pass.  Two-layer fix:
+#
+#   1. pytest_sessionfinish: close the global db._db if it's still open.
+#   2. atexit: if non-main threads are still alive, os._exit(0) to force quit.
+
+def pytest_sessionfinish(session, exitstatus):
+    """Close any leaked DB connection after the test session ends."""
+    import db.connection as _conn
+    if _conn._db is not None:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+            loop.run_until_complete(_conn.close_db())
+        except Exception:
+            pass
+
+
+def _force_exit():
+    """Last-resort exit if aiosqlite threads are still blocking shutdown."""
+    alive = [t for t in threading.enumerate()
+             if t.is_alive() and t is not threading.main_thread()]
+    if alive:
+        os._exit(0)
+
+
+atexit.register(_force_exit)
 
 
 # ── Parameter cache seeding (TASK-055) ──

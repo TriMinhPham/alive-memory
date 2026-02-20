@@ -53,6 +53,17 @@ async def nap_consolidate(top_n: int = None) -> int:
                         mood='reflective',
                         tags=['nap_reflection', moment.moment_type] + (moment.tags or []),
                     )
+                    # MD write — conscious nap reflection
+                    try:
+                        from memory_writer import get_memory_writer
+                        from memory_translator import scrub_numbers
+                        import clock as _clock
+                        writer = get_memory_writer()
+                        date_str = _clock.now().strftime('%Y-%m-%d')
+                        await writer.append_reflection(date_str, 'nap',
+                                                        scrub_numbers(reflection_text))
+                    except Exception as e:
+                        print(f"  [Memory] MD nap reflection write failed: {e}")
                 for update in reflection.get('memory_updates', []):
                     await hippocampus_consolidate(update, moment.visitor_id)
                 await db.mark_day_memory_processed(moment.id)

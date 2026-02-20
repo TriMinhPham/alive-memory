@@ -690,7 +690,7 @@ ORDER BY sim_day;
 ---
 
 ### TASK-070: Conscious Memory — MD File Layer
-**Status:** BACKLOG
+**Status:** DONE (2026-02-19)
 **Priority:** High
 **Complexity:** Large
 **Branch:** `feat/conscious-memory`
@@ -778,6 +778,97 @@ ORDER BY sim_day;
 - Every 6 hours: M4, M5, M9
 - Daily (during sleep): M6, M8, M10
 **Definition of done:** All 10 metrics with working calculators. Historical backfill from existing data. Metrics API with current snapshot + 30-day trends. Public liveness dashboard (no auth). Comparison table vs ChatGPT/Character.ai/Automaton. Embeddable badge. Hourly collection without cycle performance impact.
+
+---
+
+### HOTFIX-001: X Mention Poller — Rate Limit Backoff
+**Status:** DONE (2026-02-20)
+**Priority:** Critical
+**Branch:** `fix/x-poller-backoff`
+**Spec:** `tasks/hotfix-001-x-poller.md`
+**Description:** `XMentionPoller` polls X API every 120s. X Free tier allows 1 request per 15 minutes. First call succeeds, every subsequent call gets 429. The poller has been hammering 429 every 2 minutes for 11+ hours because `fetch_mentions()` catches 429 internally, returns `[]`, and the loop always sleeps `poll_interval` (120s) regardless of errors.
+**Fix:**
+1. Default `poll_interval` from 120 → 900 (15 min = X Free tier limit)
+2. On 429 response: raise `RateLimitError` with Retry-After value (not silently return `[]`)
+3. Polling loop: exponential backoff on RateLimitError (double retry_after, cap 1 hour)
+4. Reset interval to default on successful poll
+**Scope (files you may touch):**
+- `body/x_social.py`
+- `tests/test_x_executors.py` or `tests/test_x_poller.py` (new)
+**Scope (files you may NOT touch):**
+- Everything else
+**Tests:**
+- 429 response → RateLimitError raised with retry_after
+- Poller backs off after RateLimitError (interval doubled)
+- Poller resets interval after successful poll
+- Backoff caps at 3600s
+- Default poll_interval is 900
+**Definition of done:** Default poll interval is 900s. 429 triggers exponential backoff. Backoff caps at 1 hour. Successful poll resets interval.
+
+---
+
+### HOTFIX-002: Valence Death Spiral — Floor Bounce + Cortex Clamp
+**Status:** BACKLOG
+**Priority:** Critical
+**Branch:** `fix/valence-spiral`
+**Spec:** `tasks/hotfix-002-valence-spiral.md`
+**Description:** Valence hit -1.0 and stayed there for 12+ hours. She became catatonic — outputting "..." every cycle, ignoring visitors, zero actions. Root cause: homeostatic spring (+0.013/cycle) is 10x too weak vs cortex mood-setting (-0.10 to -0.15/cycle). Cortex reads dark context → outputs val=-0.99 → valence stays at floor → dark memories surfaced → repeat forever.
+**Fix — Four mechanisms:**
+1. **Exponential spring at extremes** — past -0.5 distance, spring force gets 3-4x multiplier (rubber band, not linear)
+2. **Cortex valence clamp** — cortex cannot swing valence more than ±0.10 per cycle (mood inertia)
+3. **Hard floor at -0.85** — she's miserable but not catatonic, can still choose to act
+4. **Action success micro-boost** — completing any action gives +0.05 valence, dialogue gives +0.10
+**Scope (files you may touch):**
+- Drive/valence update logic (likely `pipeline/hypothalamus.py` or `pipeline/output.py`)
+- Action result processing (likely `pipeline/output.py`)
+- `tests/test_valence_recovery.py` (new)
+**Scope (files you may NOT touch):**
+- `pipeline/cortex.py`, `body/*`, `sleep.py`, `heartbeat_server.py`, `window/*`
+**Tests:**
+- Exponential spring at -1.0 is 3x+ stronger than at -0.3
+- Cortex clamp: proposed -1.0 from -0.5 → result >= -0.60
+- Hard floor: valence never below -0.85
+- Action success: +0.05 boost on completion
+- 50-cycle death spiral simulation stays at floor (doesn't breach)
+- Recovery with one action success shows upward trend
+**Definition of done:** Valence floor at -0.85. Cortex clamped ±0.10/cycle. Exponential spring at extremes. Action success boosts valence. Death spiral broken.
+
+---
+
+### HOTFIX-003: Thread Dedup + Rumination Breaker
+**Status:** BACKLOG
+**Priority:** Critical
+**Branch:** `fix/thread-rumination`
+**Spec:** `tasks/hotfix-003-rumination.md`
+**Description:** She opened 6 separate "What is anti-pleasure?" threads with near-identical content. Each cycle, hippocampus surfaces the same negative thread, cortex ruminates on it, nothing breaks the loop. Two fixes: thread dedup (prevent duplicate threads) and rumination breaker (deprioritize threads after 5+ consecutive cycles in context).
+**Fix 1 — Thread dedup:**
+- Before creating new thread, check for existing open thread with same/similar topic
+- Exact match: merge content into existing thread
+- Fuzzy match (>60% word overlap): merge into existing thread
+- Closed threads don't block new ones on same topic
+- Sleep closes stale threads (>48h no updates)
+**Fix 2 — Rumination breaker:**
+- Track consecutive cycles each thread appears in context
+- After 5 consecutive cycles: salience reduced by 70%+ (exponential decay: 0.3^n)
+- Counter resets when thread drops out of context (can resurface later with fresh salience)
+**Scope (files you may touch):**
+- Thread creation logic (`pipeline/hippocampus_write.py` or `pipeline/output.py`)
+- Thread context selection (`pipeline/hippocampus.py`)
+- Sleep consolidation (`sleep.py` or `sleep/`)
+- `db/memory.py` — add `append_to_thread()` if needed
+- `tests/test_thread_dedup.py` (new)
+- `tests/test_rumination_breaker.py` (new)
+**Scope (files you may NOT touch):**
+- `pipeline/cortex.py`, `pipeline/hypothalamus.py`, `body/*`, `heartbeat_server.py`, `window/*`
+**Tests:**
+- Exact duplicate topic → returns existing thread
+- Fuzzy duplicate (>60% overlap) → merges
+- Different topics → separate threads
+- Closed thread doesn't block new one on same topic
+- Thread fades after 5 consecutive cycles (salience <0.3x)
+- Counter resets when thread drops out
+- Stale threads closed during sleep
+**Definition of done:** Cannot open duplicate threads. Rumination fades after 5 cycles. Thread counter resets on dropout. Stale threads auto-closed. "Anti-pleasure" scenario impossible.
 
 ---
 

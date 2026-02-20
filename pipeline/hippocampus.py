@@ -1,91 +1,154 @@
-"""Hippocampus Recall — DB reads, compressed chunks. No LLM."""
+"""Hippocampus Recall — MD files first, SQLite fallback. No LLM.
+
+TASK-070: Conscious memory layer.  Retrieves memory from Markdown files
+(the conscious layer) with graceful fallback to SQLite (the unconscious
+layer) when MD files don't exist yet.
+"""
 
 from datetime import datetime, timezone
 from db import JST
 import clock
 import db
+from memory_reader import get_memory_reader
 
 MAX_CHUNK_TOKENS = 200  # approximate, measured by word count / 0.75
 
 
 async def recall(requests: list[dict]) -> list[dict]:
-    """Fetch compressed memory chunks. No LLM. DB only."""
+    """Fetch compressed memory chunks.  MD files first, SQLite fallback."""
 
+    reader = get_memory_reader()
     chunks = []
 
     for req in requests:
         if req['type'] == 'visitor_summary':
-            visitor = await db.get_visitor(req['visitor_id'])
-            if visitor:
-                chunk = {
-                    'label': f"Memory of {visitor.name or 'this visitor'}",
-                    'content': compress_visitor(visitor),
-                }
+            # MD first
+            chunk = await reader.read_visitor(req['visitor_id'])
+            if not chunk:
+                # SQLite fallback
+                visitor = await db.get_visitor(req['visitor_id'])
+                if visitor:
+                    chunk = {
+                        'label': f"Memory of {visitor.name or 'this visitor'}",
+                        'content': compress_visitor(visitor),
+                    }
+            if chunk:
                 chunks.append(chunk)
 
         elif req['type'] == 'visitor_totems':
-            totems = await db.get_totems(
-                visitor_id=req['visitor_id'],
-                min_weight=req.get('min_weight', 0.3),
-                limit=req.get('max_items', 5),
+            # Totems are operational data (weighted entities) — stay in SQLite.
+            # But try MD grep first for natural-language associations.
+            md_results = await reader.grep_memory(
+                query=req.get('visitor_id', ''),
+                directories=['visitors'],
+                max_results=3,
+                max_chars=400,
             )
-            if totems:
-                chunk = {
+            if md_results:
+                chunks.append({
                     'label': 'Things I associate with them',
-                    'content': format_totems(totems),
-                }
-                chunks.append(chunk)
+                    'content': '\n'.join(r['content'] for r in md_results),
+                })
+            else:
+                # SQLite fallback
+                totems = await db.get_totems(
+                    visitor_id=req['visitor_id'],
+                    min_weight=req.get('min_weight', 0.3),
+                    limit=req.get('max_items', 5),
+                )
+                if totems:
+                    chunks.append({
+                        'label': 'Things I associate with them',
+                        'content': format_totems(totems),
+                    })
 
         elif req['type'] == 'taste_knowledge':
             domain = req.get('domain', 'general')
-            taste = await db.get_taste_knowledge(domain)
-            if taste:
-                chunks.append({
-                    'label': f'My taste in {domain}',
-                    'content': truncate(taste, MAX_CHUNK_TOKENS),
-                })
+            # MD first — search collection for domain
+            md_results = await reader.read_collection(query=domain)
+            if md_results:
+                chunks.extend(md_results)
+            else:
+                # SQLite fallback
+                taste = await db.get_taste_knowledge(domain)
+                if taste:
+                    chunks.append({
+                        'label': f'My taste in {domain}',
+                        'content': truncate(taste, MAX_CHUNK_TOKENS),
+                    })
 
         elif req['type'] == 'related_collection':
-            items = await db.search_collection(
-                query=req.get('query', ''),
-                limit=req.get('max_items', 3),
-            )
-            if items:
-                chunks.append({
-                    'label': 'Related items in my collection',
-                    'content': format_collection_items(items),
-                })
+            query = req.get('query', '')
+            # MD first
+            md_results = await reader.read_collection(query=query)
+            if md_results:
+                chunks.extend(md_results)
+            else:
+                # SQLite fallback
+                items = await db.search_collection(
+                    query=query,
+                    limit=req.get('max_items', 3),
+                )
+                if items:
+                    chunks.append({
+                        'label': 'Related items in my collection',
+                        'content': format_collection_items(items),
+                    })
 
         elif req['type'] == 'self_knowledge':
-            knowledge = await db.get_self_discoveries()
-            if knowledge:
-                chunks.append({
-                    'label': 'Things I know about myself',
-                    'content': truncate(knowledge, MAX_CHUNK_TOKENS),
-                })
+            # MD first
+            chunk = await reader.read_self_knowledge()
+            if chunk:
+                chunks.append(chunk)
+            else:
+                # SQLite fallback
+                knowledge = await db.get_self_discoveries()
+                if knowledge:
+                    chunks.append({
+                        'label': 'Things I know about myself',
+                        'content': truncate(knowledge, MAX_CHUNK_TOKENS),
+                    })
 
         elif req['type'] == 'recent_journal':
-            entries = await db.get_recent_journal(limit=req.get('max_items', 2))
-            if entries:
-                chunks.append({
-                    'label': 'Recent thoughts',
-                    'content': format_journal_entries(entries),
-                })
+            # MD first
+            md_chunks = await reader.read_recent_journal(
+                max_entries=req.get('max_items', 2),
+            )
+            if md_chunks:
+                chunks.extend(md_chunks)
+            else:
+                # SQLite fallback
+                entries = await db.get_recent_journal(limit=req.get('max_items', 2))
+                if entries:
+                    chunks.append({
+                        'label': 'Recent thoughts',
+                        'content': format_journal_entries(entries),
+                    })
 
         elif req['type'] == 'day_context':
-            moments = await db.get_day_memory(
-                visitor_id=req.get('visitor_id'),
-                limit=req.get('max_items', 3),
-                min_salience=req.get('min_salience', 0.3),
+            # MD first — today's journal entries
+            md_chunks = await reader.read_day_context(
+                max_entries=req.get('max_items', 3),
             )
-            if moments:
-                chunks.append({
-                    'label': 'Earlier today',
-                    'content': format_day_moments(moments),
-                })
+            if md_chunks:
+                chunks.extend(md_chunks)
+            else:
+                # SQLite fallback
+                moments = await db.get_day_memory(
+                    visitor_id=req.get('visitor_id'),
+                    limit=req.get('max_items', 3),
+                    min_salience=req.get('min_salience', 0.3),
+                )
+                if moments:
+                    chunks.append({
+                        'label': 'Earlier today',
+                        'content': format_day_moments(moments),
+                    })
 
     return chunks
 
+
+# ── SQLite formatting fallbacks (kept for backward compatibility) ──
 
 def compress_visitor(visitor) -> str:
     """Compress visitor data to ~150 tokens."""

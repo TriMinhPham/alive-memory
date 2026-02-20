@@ -57,6 +57,60 @@ def _record_success():
     _circuit_open_until = 0.0
 
 
+# ── Rumination Breaker (HOTFIX-003) ──
+# Track how many consecutive cycles each thread appears in cortex context.
+# After RUMINATION_THRESHOLD consecutive appearances, exponentially reduce
+# effective priority so other threads can surface.
+_THREAD_APPEARANCE_COUNTER: dict[str, int] = {}
+_LAST_SELECTED_THREAD_IDS: set[str] = set()
+RUMINATION_THRESHOLD = 5
+RUMINATION_DECAY_FACTOR = 0.3  # per cycle past threshold
+
+
+def _apply_rumination_breaker(threads: list) -> list:
+    """Reorder threads by fatigue-adjusted priority.
+
+    Threads that have appeared in context for >= RUMINATION_THRESHOLD consecutive
+    cycles get exponentially reduced priority. Threads that drop out of context
+    have their counter reset, so they can resurface later with fresh salience.
+
+    Returns threads sorted by effective priority (descending), max 3.
+    """
+    global _THREAD_APPEARANCE_COUNTER, _LAST_SELECTED_THREAD_IDS
+
+    scored = []
+    for t in threads:
+        consecutive = _THREAD_APPEARANCE_COUNTER.get(t.id, 0)
+        if consecutive >= RUMINATION_THRESHOLD:
+            fatigue = RUMINATION_DECAY_FACTOR ** (consecutive - RUMINATION_THRESHOLD + 1)
+            effective = t.priority * fatigue
+        else:
+            effective = t.priority
+        scored.append((t, effective))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    selected = [t for t, _ in scored[:3]]  # keep top 3
+
+    selected_ids = {t.id for t in selected}
+
+    # Reset counters for threads that were selected last cycle but not this cycle
+    # (they "dropped out of context")
+    for tid in _LAST_SELECTED_THREAD_IDS - selected_ids:
+        _THREAD_APPEARANCE_COUNTER[tid] = 0
+
+    # Also reset counters for threads in input but not selected
+    for t in threads:
+        if t.id not in selected_ids:
+            _THREAD_APPEARANCE_COUNTER[t.id] = 0
+
+    # Increment counters for selected threads
+    for t in selected:
+        _THREAD_APPEARANCE_COUNTER[t.id] = _THREAD_APPEARANCE_COUNTER.get(t.id, 0) + 1
+
+    _LAST_SELECTED_THREAD_IDS = selected_ids
+    return selected
+
+
 def _check_daily_cap() -> bool:
     global _daily_cycle_count, _daily_cycle_date
     today = clock.now_utc().date().isoformat()
@@ -369,7 +423,9 @@ async def cortex_call(
         parts.append(_r.text); _trim_results.append(_r)
 
     # U4: Active threads (inner agenda)
-    active_threads = await db.get_active_threads(limit=3)
+    # Fetch more than 3 so rumination breaker can pick alternatives
+    active_threads = await db.get_active_threads(limit=6)
+    active_threads = _apply_rumination_breaker(active_threads)
     if active_threads:
         thread_lines = ["\nTHINGS ON MY MIND:"]
         for t in active_threads:
