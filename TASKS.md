@@ -909,6 +909,52 @@ ORDER BY sim_day;
 
 ---
 
+### TASK-073: Track B — 10,000 Cycle Longitudinal Run
+**Status:** BACKLOG
+**Priority:** High
+**Branch:** `feat/research-sim`
+**Depends on:** TASK-072 (research simulation framework — cache collision fix, mock expression fix)
+**Description:** Run a 10,000 cycle simulation using the full ALIVE variant with real LLM (minimax/minimax-m2.5 via OpenRouter) to produce long-horizon behavioral data for the research paper (Experiment 3). This is independent of the ablation suite (Track A, 6 variants × 1000 cycles) and can run in parallel on VPS.
+**Execution:**
+- Environment: Production VPS (or second VPS for isolation), inside tmux/screen session
+- Branch: `feat/research-sim` (or latest main if merged)
+- Command:
+  ```
+  tmux new-session -d -s track-b
+  tmux send-keys -t track-b "python -m sim.runner \
+    --variant full \
+    --cycles 10000 \
+    --llm openrouter/minimax-m2.5 \
+    --seed 42 \
+    --output sim/results/longitudinal_m25_full_10k.json \
+    &>> sim/results/longitudinal_m25_full_10k.log" Enter
+  ```
+  Adjust CLI flags to match actual runner interface.
+- Monitor: `tail -f sim/results/longitudinal_m25_full_10k.log`
+**Output:**
+- Results JSON: `sim/results/longitudinal_m25_full_10k.json`
+- Log file: `sim/results/longitudinal_m25_full_10k.log`
+- Metrics to capture: all standard (initiative %, entropy, knowledge, emotional range, unprompted memories) plus temporal evolution data for Figure 4
+**Context (fixes already deployed):**
+- Cache collision bug fixed (`sim/llm/cached.py` — drives stripped from hash, variant in key, max reuse cap 3)
+- Mock expression bug fixed (`sim/llm/mock.py` — threshold lowered, branch priority reordered, drive updates action-aware)
+**Success criteria:**
+- 10,000 cycles complete without crash
+- Emotional range > 0 (confirms affect system active over long horizon)
+- Action diversity present (browses, posts, journals, dialogue)
+- Memory consolidation events occur (sleep cycles trigger consolidation)
+- No cache feedback loops (browse count should not dominate >70% of actions)
+**Scope (files you may touch):**
+- `sim/results/` (output files only)
+- `sim/runner.py` (CLI flag adjustments only if needed)
+**Scope (files you may NOT touch):**
+- `pipeline/*`
+- `db.py`
+- `heartbeat.py`
+**Notes:** This is Experiment 3 from the paper spec (`briefs/TASK-072-research-simulation.md`). 10k cycles ≈ simulated weeks of character life — enough to show consolidation patterns, behavioral drift, and personality stability over time. Data feeds into longitudinal analysis for Figure 4.
+
+---
+
 ## Completed Tasks
 
 ### TASK-054: Fix inhibition self_assessment trigger
