@@ -21,6 +21,7 @@ from typing import Optional
 import clock
 import db
 from config.identity import IDENTITY_COMPACT
+from memory_translator import mood_word as _mood_word, drive_level as _drive_level, energy_word as _energy_word
 
 # ── Token budget ──
 # Character-estimate heuristic: ~4 chars per token on average.
@@ -44,55 +45,6 @@ def _truncate_to_budget(text: str, max_chars: int = SELF_CONTEXT_MAX_CHARS) -> s
     if last_nl > max_chars // 2:
         truncated = truncated[:last_nl]
     return truncated
-
-
-# ── Mood descriptor helpers ──
-
-def _mood_word(valence: float, arousal: float) -> str:
-    """Convert valence/arousal to a natural mood word."""
-    if valence > 0.5 and arousal > 0.5:
-        return 'energized'
-    if valence > 0.5 and arousal <= 0.5:
-        return 'content'
-    if valence > 0.2 and arousal > 0.5:
-        return 'curious'
-    if valence > 0.2:
-        return 'calm'
-    if valence > -0.2 and arousal > 0.5:
-        return 'restless'
-    if valence > -0.2:
-        return 'neutral'
-    if valence > -0.5 and arousal > 0.5:
-        return 'agitated'
-    if valence > -0.5:
-        return 'subdued'
-    if arousal > 0.5:
-        return 'distressed'
-    return 'low'
-
-
-def _drive_level(value: float) -> str:
-    """Convert a 0-1 drive value to a natural word."""
-    if value > 0.8:
-        return 'high'
-    if value > 0.6:
-        return 'moderate'
-    if value > 0.3:
-        return 'low'
-    return 'quiet'
-
-
-def _energy_word(ratio: float) -> str:
-    """Convert remaining budget ratio to an energy word."""
-    if ratio > 0.8:
-        return 'full'
-    if ratio > 0.6:
-        return 'good'
-    if ratio > 0.35:
-        return 'moderate'
-    if ratio > 0.15:
-        return 'low'
-    return 'depleted'
 
 
 # ── Diegetic mappings (migrated from heartbeat.py) ──

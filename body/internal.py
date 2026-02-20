@@ -106,6 +106,16 @@ async def execute_write_journal(action: ActionRequest, visitor_id: str = None,
         )
         result.content = journal_text
         result.side_effects.append('journal_entry_created')
+        # MD write — conscious journal
+        try:
+            from memory_writer import get_memory_writer
+            from memory_translator import scrub_numbers
+            writer = get_memory_writer()
+            await writer.append_journal(scrub_numbers(journal_text),
+                                        mood_desc=detail.get('mood'),
+                                        tags=detail.get('tags', []))
+        except Exception as e:
+            print(f"  [Memory] MD journal write failed: {e}")
         await db.append_event(Event(
             event_type='action_journal',
             source='self',

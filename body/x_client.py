@@ -163,5 +163,12 @@ async def fetch_mentions(since_id: str = None) -> list[dict]:
         return mentions
 
     except Exception as e:
+        # Let rate limit errors propagate so the poller can back off
+        try:
+            import tweepy
+            if isinstance(e, tweepy.TooManyRequests):
+                raise
+        except ImportError:
+            pass
         print(f"  [XClient] Mention fetch failed: {type(e).__name__}: {e}")
         return []

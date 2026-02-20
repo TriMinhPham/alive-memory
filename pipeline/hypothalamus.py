@@ -5,6 +5,15 @@ from models.state import DrivesState, EpistemicCuriosity, EPISTEMIC_CONFIG
 from db.parameters import p
 import db as _db
 
+# ── HOTFIX-002: Valence death spiral prevention ──
+# Hard floor: she can be deeply unhappy but not catatonic.
+# At -0.85 she's miserable but can still speak/act. At -1.0 she froze.
+VALENCE_HARD_FLOOR = -0.85
+# Per-cycle clamp: cortex/coupling cannot swing valence more than this.
+# Gives mood inertia — thoughts influence mood gradually, not instantly.
+MAX_VALENCE_DELTA_PER_CYCLE = 0.10
+VALENCE_EQUILIBRIUM = 0.05  # must match hypothalamus.equilibria.mood_valence
+
 
 def clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
@@ -16,11 +25,21 @@ def _homeostatic_pull(current: float, equilibrium: float,
     """Pull a drive toward its equilibrium point.
 
     Proportional spring: further from equilibrium = stronger pull.
-    At extremes (distance ~0.5-1.0), pull is ~0.075-0.15/hr,
-    which competes meaningfully with time-based forces (+0.03-0.06/hr).
+    At extremes (distance > 0.5), spring is exponential — like a rubber
+    band that gets much stronger the further you stretch it. This prevents
+    valence death spirals where negative mood self-reinforces via dark
+    context (HOTFIX-002).
+
     Near equilibrium, pull vanishes, letting natural variation emerge.
     """
-    delta = (equilibrium - current) * p('hypothalamus.homeostatic_pull_rate') * elapsed_hours
+    distance = abs(equilibrium - current)
+    base_delta = (equilibrium - current) * p('hypothalamus.homeostatic_pull_rate') * elapsed_hours
+    if distance > 0.5:
+        # Exponential spring — gets much stronger past 0.5 distance
+        multiplier = 1 + (distance * 3)
+        delta = base_delta * multiplier
+    else:
+        delta = base_delta
     return clamp(current + delta, lo, hi)
 
 
@@ -43,6 +62,9 @@ async def update_drives(
     """
 
     new = drives.copy()
+
+    # HOTFIX-002: Snapshot valence at entry for per-cycle delta clamp
+    valence_at_entry = new.mood_valence
 
     # Time-based decay/buildup
     new.social_hunger = clamp(new.social_hunger + p('hypothalamus.time_decay.social_hunger_per_hour') * elapsed_hours)
@@ -185,6 +207,20 @@ async def update_drives(
     # (TASK-050). No energy-to-mood coupling — being in rest mode means no
     # actions, expression_need builds, valence drops via existing drive coupling.
     # The real constraint creates realistic mood consequences without artificial wiring.
+
+    # ─── HOTFIX-002: Valence death spiral prevention ───
+    # Mechanism 2: Clamp total valence delta per cycle.
+    # All the above forces (homeostatic pull, coupling, events) can only move
+    # valence by ±MAX_VALENCE_DELTA_PER_CYCLE from its entry value. This gives
+    # mood inertia — forces influence mood gradually, not instantly.
+    total_delta = new.mood_valence - valence_at_entry
+    if abs(total_delta) > MAX_VALENCE_DELTA_PER_CYCLE:
+        clamped_delta = MAX_VALENCE_DELTA_PER_CYCLE if total_delta > 0 else -MAX_VALENCE_DELTA_PER_CYCLE
+        new.mood_valence = valence_at_entry + clamped_delta
+
+    # Mechanism 3: Hard floor. She can be deeply unhappy but not catatonic.
+    # At -0.85 she's miserable but can still choose to speak, browse, or act.
+    new.mood_valence = max(new.mood_valence, VALENCE_HARD_FLOOR)
 
     # Generate feelings text
     feelings = drives_to_feeling(new)
