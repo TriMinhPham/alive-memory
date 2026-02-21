@@ -568,10 +568,6 @@ def _extract_content_id_from_content(content: str) -> str | None:
         value = raw.split(':', 1)[1].strip()
         return value or None
 
-    # Accept bare IDs (single token) as a last resort.
-    if ' ' not in raw:
-        return raw
-
     return None
 
 
@@ -585,10 +581,13 @@ def _backfill_action_detail(decision: ActionDecision) -> None:
 
     text_actions = {
         'speak', 'write_journal', 'post_x_draft', 'post_x', 'reply_x',
-        'post_x_image', 'tg_send', 'tg_send_image', 'express_thought',
+        'post_x_image', 'tg_send', 'express_thought',
     }
     if decision.action in text_actions and not detail.get('text') and not detail.get('content'):
         detail['text'] = content
+
+    if decision.action == 'tg_send_image' and not detail.get('caption'):
+        detail['caption'] = content
 
     content_actions = {'read_content', 'save_for_later', 'mention_in_conversation'}
     if decision.action in content_actions and not detail.get('content_id'):
