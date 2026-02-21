@@ -99,7 +99,9 @@ def _classify_channel(action_name: str, target: str | None) -> str:
     a = (action_name or '').lower()
     if a.startswith('tg_'):
         return 'telegram'
-    if 'x' in a:
+    if a in {'post_x', 'reply_x', 'post_x_image', 'post_x_draft'}:
+        return 'x'
+    if a.startswith('x_') or a.endswith('_x'):
         return 'x'
     if a in {'browse_web'}:
         return 'web'
