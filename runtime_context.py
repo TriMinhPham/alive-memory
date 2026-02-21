@@ -77,7 +77,7 @@ def _default_config_hash() -> str:
     return hash_json(payload)
 
 
-@dataclass(frozen=True)
+@dataclass
 class RunMetadata:
     run_id: str
     boot_cycle_id: str
@@ -101,7 +101,7 @@ _boot_cycle_id = f"boot-{_run_id[:8]}"
 _run_meta = RunMetadata(
     run_id=_run_id,
     boot_cycle_id=_boot_cycle_id,
-    commit_hash=_git_commit_hash(),
+    commit_hash=(os.getenv("GIT_COMMIT_HASH") or "").strip(),
     config_hash=(os.getenv("CONFIG_HASH") or _default_config_hash()).strip(),
     process_start_utc=clock.now_utc().isoformat(),
 )
@@ -113,6 +113,8 @@ _cycle_ctx_var: contextvars.ContextVar[Optional[CycleContext]] = contextvars.Con
 
 
 def get_run_metadata() -> RunMetadata:
+    if not _run_meta.commit_hash:
+        _run_meta.commit_hash = _git_commit_hash()
     return _run_meta
 
 

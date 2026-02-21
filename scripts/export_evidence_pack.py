@@ -148,7 +148,9 @@ def classify_action_type(action: str) -> str:
 
 def classify_channel(action: str, target: str | None) -> str:
     a = (action or "").lower()
-    if "x" in a:
+    if a in {"post_x", "reply_x", "post_x_image", "post_x_draft"}:
+        return "x"
+    if a.startswith("x_") or a.endswith("_x"):
         return "x"
     if a.startswith("tg_") or a.startswith("tg"):
         return "telegram"

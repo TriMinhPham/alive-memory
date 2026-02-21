@@ -15,8 +15,10 @@ Individual action handlers live in the body/ package (body/internal.py for
 existing actions, body/web.py, body/x_social.py, body/telegram.py for external).
 """
 
-import clock
 import re
+from datetime import datetime, timezone
+
+import clock
 from models.event import Event
 from models.pipeline import (
     ValidatedOutput, ActionRequest, MotorPlan,
@@ -29,11 +31,33 @@ import db
 from runtime_context import hash_text
 
 
+_RECALL_STOPWORDS = {
+    'about', 'after', 'before', 'being', 'could', 'first', 'from', 'have',
+    'into', 'just', 'like', 'more', 'that', 'their', 'there', 'these',
+    'they', 'this', 'what', 'when', 'where', 'which', 'with', 'would',
+}
+
+
 def _tokenize_words(text: str | None) -> set[str]:
     if not text:
         return set()
     parts = re.split(r'[^a-zA-Z0-9_]+', text.lower())
-    return {p for p in parts if len(p) >= 4}
+    return {p for p in parts if len(p) >= 4 and p not in _RECALL_STOPWORDS}
+
+
+def _as_utc_datetime(value: datetime | str | None) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return None
 
 
 async def _log_recall_probe(visitor_id: str, dialogue: str, cycle_id: str | None) -> None:
@@ -58,21 +82,33 @@ async def _log_recall_probe(visitor_id: str, dialogue: str, cycle_id: str | None
 
         best = None
         best_score = 0.0
+        best_shared = 0
+        best_fact_token_count = 0
         for trait in traits:
             fact_tokens = _tokenize_words(f"{trait.trait_key} {trait.trait_value}")
             if not fact_tokens:
                 continue
-            overlap = len(answer_tokens & fact_tokens) / max(len(fact_tokens), 1)
-            if overlap > best_score:
+            shared_count = len(answer_tokens & fact_tokens)
+            overlap = shared_count / max(len(fact_tokens), 1)
+            if overlap > best_score or (overlap == best_score and shared_count > best_shared):
                 best_score = overlap
+                best_shared = shared_count
+                best_fact_token_count = len(fact_tokens)
                 best = trait
 
         if not best:
             return
 
+        min_shared = 1 if best_fact_token_count <= 2 else 2
+        min_overlap = 0.5 if best_fact_token_count <= 2 else 0.35
+        retrieved = best_shared >= min_shared and best_score >= min_overlap
+
+        observed_at = _as_utc_datetime(getattr(best, 'observed_at', None))
+        horizon = 0
+        if observed_at:
+            horizon = int(max((clock.now_utc() - observed_at).total_seconds(), 0) // 3600)
+
         question_id = f"{visitor_id}:{hash_text(question)[:12]}:{int(clock.now_utc().timestamp())}"
-        horizon = int((clock.now_utc() - best.observed_at).total_seconds() // 3600)
-        retrieved = best_score >= 0.15
         await db.log_recall_test(
             question_id=question_id,
             fact_id=best.id,
@@ -87,8 +123,9 @@ async def _log_recall_probe(visitor_id: str, dialogue: str, cycle_id: str | None
                 'answer_hash': hash_text(dialogue),
             },
         )
-    except Exception:
+    except Exception as e:
         # Recall probing is observability-only and must never break body execution.
+        print(f"  [RecallProbe] logging skipped: {type(e).__name__}: {e}")
         return
 
 
