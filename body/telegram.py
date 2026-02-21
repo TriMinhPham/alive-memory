@@ -14,7 +14,12 @@ import clock
 from models.event import Event
 from models.pipeline import ActionRequest, ActionResult
 from body.executor import register
-from body.rate_limiter import check_rate_limit, record_action, is_channel_enabled
+from body.rate_limiter import (
+    get_limiter_decision,
+    is_channel_enabled,
+    limiter_payload,
+    record_action,
+)
 from pipeline.ack import on_visitor_connect
 import db
 
@@ -168,10 +173,12 @@ async def execute_tg_send(action: ActionRequest, visitor_id: str = None,
         result.error = 'telegram channel disabled'
         return result
 
-    allowed, reason = await check_rate_limit('tg_send')
-    if not allowed:
+    limiter = await get_limiter_decision('tg_send')
+    limiter_meta = limiter_payload(limiter)
+    if not limiter['allowed']:
         result.success = False
-        result.error = reason
+        result.error = str(limiter['reason'])
+        result.payload = dict(limiter_meta)
         return result
 
     text = (action.detail.get('text') or action.detail.get('content', '')).strip()
@@ -191,14 +198,19 @@ async def execute_tg_send(action: ActionRequest, visitor_id: str = None,
 
     await record_action('tg_send', success=api_result.get('success', False),
                         channel='telegram',
-                        error=api_result.get('error'))
+                        error=api_result.get('error'),
+                        **limiter_meta)
 
     if api_result.get('success'):
-        result.payload = {'message_id': api_result.get('message_id')}
+        result.payload = {
+            'message_id': api_result.get('message_id'),
+            **limiter_meta,
+        }
         result.side_effects.append('tg_message_sent')
     else:
         result.success = False
         result.error = api_result.get('error', 'send failed')
+        result.payload = dict(limiter_meta)
 
     return result
 
@@ -214,10 +226,12 @@ async def execute_tg_send_image(action: ActionRequest, visitor_id: str = None,
         result.error = 'telegram channel disabled'
         return result
 
-    allowed, reason = await check_rate_limit('tg_send_image')
-    if not allowed:
+    limiter = await get_limiter_decision('tg_send_image')
+    limiter_meta = limiter_payload(limiter)
+    if not limiter['allowed']:
         result.success = False
-        result.error = reason
+        result.error = str(limiter['reason'])
+        result.payload = dict(limiter_meta)
         return result
 
     image_path = action.detail.get('image_path', '')
@@ -239,13 +253,18 @@ async def execute_tg_send_image(action: ActionRequest, visitor_id: str = None,
 
     await record_action('tg_send_image', success=api_result.get('success', False),
                         channel='telegram',
-                        error=api_result.get('error'))
+                        error=api_result.get('error'),
+                        **limiter_meta)
 
     if api_result.get('success'):
-        result.payload = {'message_id': api_result.get('message_id')}
+        result.payload = {
+            'message_id': api_result.get('message_id'),
+            **limiter_meta,
+        }
         result.side_effects.append('tg_image_sent')
     else:
         result.success = False
         result.error = api_result.get('error', 'send failed')
+        result.payload = dict(limiter_meta)
 
     return result
