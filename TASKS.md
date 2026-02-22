@@ -1167,7 +1167,7 @@ ORDER BY sim_day;
 ---
 
 ### TASK-080: browse_web Emits content_consumed for Failed Pool Inserts
-**Status:** BACKLOG
+**Status:** DONE (2026-02-22)
 **Priority:** Medium
 **Description:** In `body/web.py`, the pool insert (`insert_pool_item`) is best-effort — failures are caught and swallowed (line 82). But the `content_consumed` event is emitted unconditionally (line 100) with the `content_id` that was never persisted. This produces dangling `content_id` references in analytics/drive updates. Compare with `body/internal.py:245-248` (`read_content`), which validates pool item existence before emitting consumption events. Fix: gate the `content_consumed` event on pool insert success.
 **Scope (files you may touch):**
@@ -1186,7 +1186,7 @@ ORDER BY sim_day;
 ---
 
 ### TASK-081: test_web_browse Non-Hermetic — Leaks MagicMock Files to Repo
-**Status:** BACKLOG
+**Status:** DONE (2026-02-22)
 **Priority:** Medium
 **Description:** Test fixture in `tests/test_web_browse.py` mocks `clock.now_utc` (line 19) but not `clock.now()`. Production code at `body/web.py:92` calls `clock.now().strftime(...)` for the browse filename, which falls through to the unmocked `MagicMock.now()` — producing filenames like `<MagicMock name='clock.now().strftime()' id='...'>`. The `memory_writer` path also isn't mocked, so real files are written to `data/memory/browse/`. This is visible in the repo's untracked files (170+ MagicMock-named artifacts).
 **Fix:**
