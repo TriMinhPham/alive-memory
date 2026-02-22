@@ -68,6 +68,7 @@ async def execute_browse_web(action: ActionRequest, visitor_id: str = None,
 
     # Inject into content pool for reflection
     content_id = str(uuid.uuid4())
+    pool_insert_ok = False
     try:
         from db.content import insert_pool_item
         await insert_pool_item({
@@ -79,10 +80,11 @@ async def execute_browse_web(action: ActionRequest, visitor_id: str = None,
             'content_type': 'article',
             'status': 'ready',
         })
+        pool_insert_ok = True
     except Exception as e:
         print(f"  [BrowseWeb] Failed to insert pool item: {e}")
 
-    # MD write — conscious browse memory
+    # MD write — conscious browse memory (independent of pool insert)
     try:
         import re as _re
         from memory_writer import get_memory_writer
@@ -95,17 +97,18 @@ async def execute_browse_web(action: ActionRequest, visitor_id: str = None,
     except Exception as e:
         print(f"  [Memory] MD browse write failed: {e}")
 
-    # Emit event
-    from models.event import Event
-    await db.append_event(Event(
-        event_type='content_consumed',
-        source='self',
-        payload={
-            'content_id': content_id,
-            'title': f'Web search: {query[:80]}',
-            'source': 'browse_web',
-        },
-    ))
+    # Emit event only if pool insert succeeded — prevents dangling content_id refs
+    if pool_insert_ok:
+        from models.event import Event
+        await db.append_event(Event(
+            event_type='content_consumed',
+            source='self',
+            payload={
+                'content_id': content_id,
+                'title': f'Web search: {query[:80]}',
+                'source': 'browse_web',
+            },
+        ))
 
     await record_action(
         'browse_web',
