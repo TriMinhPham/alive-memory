@@ -1137,7 +1137,7 @@ class ShopkeeperServer:
             elif path == '/api/state' and method == 'GET':
                 await self._http_state(writer)
             elif path == '/api/health' and method == 'GET':
-                await self._http_json(writer, 200, {'status': 'alive'})
+                await self._http_json(writer, 200, self.heartbeat.get_health_status())
             elif path == '/api/validate-token' and method == 'POST':
                 await self._http_validate_token(writer, body_bytes)
             elif path == '/api/og' and method == 'GET':

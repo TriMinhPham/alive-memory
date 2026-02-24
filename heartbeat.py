@@ -123,6 +123,9 @@ class Heartbeat:
     INTERVAL_MIN = 10
     INTERVAL_MAX = 600
     INTERVAL_DEFAULT = 180  # 3 minutes
+    HEALTH_DEGRADED_AFTER_SECONDS = 300
+    SUPERVISOR_RESTART_MIN = 1
+    SUPERVISOR_RESTART_MAX = 30
 
     def __init__(self):
         self.running = False
@@ -135,6 +138,7 @@ class Heartbeat:
         self._recent_fidgets: list[tuple] = []  # (behavior_key, description, timestamp)
         self._cycle_log_subscribers: dict[str, asyncio.Queue] = {}
         self._loop_task = None
+        self._supervisor_task = None
         self._stage_callback: StageCallback = None
         self._window_broadcast: Optional[Callable] = None
         self._error_backoff = 5
@@ -148,6 +152,9 @@ class Heartbeat:
         self._last_expression_taken: bool = False  # TASK-046: previous cycle had expression action
         self._recent_action_types: list[str] = []  # last 3 cycle primary actions
         self._self_model: Optional[SelfModel] = None  # TASK-061: persistent behavioral mirror
+        self._last_loop_tick_ts: Optional[datetime] = None
+        self._loop_restart_count: int = 0
+        self._last_loop_error: Optional[str] = None
         self._run_meta = get_run_metadata()
 
         # TASK-057: Set X draft cooldown (30 min between posts at gate level)
@@ -226,6 +233,125 @@ class Heartbeat:
         if self._stage_callback:
             await self._stage_callback(stage, data)
 
+    def _touch_loop_heartbeat(self):
+        """Mark that the main loop is still making progress."""
+        self._last_loop_tick_ts = clock.now_utc()
+
+    def get_health_status(self, stale_after_seconds: int | None = None) -> dict:
+        """Return health snapshot for HTTP liveness probes."""
+        if stale_after_seconds is None:
+            stale_after_seconds = self.HEALTH_DEGRADED_AFTER_SECONDS
+
+        loop_running = bool(self._loop_task and not self._loop_task.done())
+        supervisor_running = bool(self._supervisor_task and not self._supervisor_task.done())
+        seconds_since_last_tick = None
+        if self._last_loop_tick_ts is not None:
+            seconds_since_last_tick = max(
+                0.0, (clock.now_utc() - self._last_loop_tick_ts).total_seconds()
+            )
+
+        status = 'alive'
+        reason = 'ok'
+        if not self.running:
+            status = 'degraded'
+            reason = 'heartbeat_stopped'
+        elif seconds_since_last_tick is None:
+            status = 'degraded'
+            reason = 'no_loop_heartbeat'
+        elif seconds_since_last_tick > stale_after_seconds:
+            status = 'degraded'
+            reason = 'loop_heartbeat_stale'
+        elif not supervisor_running:
+            status = 'degraded'
+            reason = 'supervisor_not_running'
+
+        return {
+            'status': status,
+            'reason': reason,
+            'loop_running': loop_running,
+            'supervisor_running': supervisor_running,
+            'seconds_since_last_tick': (
+                round(seconds_since_last_tick)
+                if seconds_since_last_tick is not None else None
+            ),
+            'stale_after_seconds': stale_after_seconds,
+            'restart_count': self._loop_restart_count,
+            'last_loop_error': self._last_loop_error,
+        }
+
+    async def _main_loop_supervisor(self):
+        """Keep _main_loop alive and restart it if it crashes."""
+        restart_delay = self.SUPERVISOR_RESTART_MIN
+        while self.running:
+            self._touch_loop_heartbeat()
+            started_at = clock.now_utc()
+            self._loop_task = asyncio.create_task(self._main_loop())
+            exit_reason = 'loop_returned'
+            stack_hash = None
+            try:
+                await self._loop_task
+            except asyncio.CancelledError:
+                if not self.running:
+                    break
+                exit_reason = 'loop_cancelled'
+            except BaseException as e:
+                clear_cycle_context()
+                stack_txt = traceback.format_exc()
+                exit_reason = f'{type(e).__name__}: {e}'
+                try:
+                    stack_hash = db.hash_stacktrace(stack_txt)
+                except Exception:
+                    stack_hash = None
+            finally:
+                self._loop_task = None
+
+            if not self.running:
+                break
+
+            self._loop_restart_count += 1
+            self._last_loop_error = exit_reason
+            run_seconds = max(0.0, (clock.now_utc() - started_at).total_seconds())
+            print(
+                "  [Heartbeat Supervisor] "
+                f"Main loop exited ({exit_reason}); restarting in {restart_delay}s"
+            )
+            try:
+                await db.log_runtime_event(
+                    event_type='main_loop_restart',
+                    cycle_id=self._run_meta.boot_cycle_id,
+                    error_type=exit_reason.split(':', 1)[0],
+                    stack_hash=stack_hash,
+                    payload={
+                        'reason': exit_reason,
+                        'restart_count': self._loop_restart_count,
+                        'run_seconds': round(run_seconds, 3),
+                        'restart_delay_seconds': restart_delay,
+                    },
+                )
+            except Exception:
+                pass
+
+            self._touch_loop_heartbeat()
+            try:
+                await asyncio.wait_for(self._wake_event.wait(), timeout=restart_delay)
+            except asyncio.TimeoutError:
+                pass
+            except asyncio.CancelledError:
+                break
+            finally:
+                # If stop() is not in progress, consume wake so it doesn't
+                # keep future supervisor backoffs at zero delay.
+                if self.running and self._wake_event.is_set():
+                    self._wake_event.clear()
+
+            if run_seconds >= 60:
+                restart_delay = self.SUPERVISOR_RESTART_MIN
+            else:
+                restart_delay = min(
+                    self.SUPERVISOR_RESTART_MAX,
+                    max(self.SUPERVISOR_RESTART_MIN, restart_delay * 2),
+                )
+
     async def start(self):
         self.running = True
         try:
@@ -293,10 +419,14 @@ class Heartbeat:
             )
         except Exception as e:
             print(f"  [Heartbeat] Runtime resume logging failed: {e}")
-        self._loop_task = asyncio.create_task(self._main_loop())
+        self._loop_restart_count = 0
+        self._last_loop_error = None
+        self._touch_loop_heartbeat()
+        self._supervisor_task = asyncio.create_task(self._main_loop_supervisor())
 
     async def stop(self):
         self.running = False
+        loop_task_ref = self._loop_task
         try:
             await db.log_runtime_event(
                 event_type='process_exit',
@@ -308,18 +438,33 @@ class Heartbeat:
             print(f"  [Heartbeat] Runtime stop logging failed: {e}")
         self.pending_microcycle.set()  # wake up any wait
         self._wake_event.set()  # also wake interruptible_sleep
-        if self._loop_task:
+        if self._supervisor_task:
             try:
-                await asyncio.wait_for(self._loop_task, timeout=10)
+                await asyncio.wait_for(self._supervisor_task, timeout=10)
             except (asyncio.TimeoutError, asyncio.CancelledError):
-                self._loop_task.cancel()
+                self._supervisor_task.cancel()
                 try:
-                    await self._loop_task
+                    await self._supervisor_task
                 except asyncio.CancelledError:
                     pass
+            finally:
+                self._supervisor_task = None
+
+        # If supervisor exits via forced cancel, its finally block may set
+        # self._loop_task=None before stop() gets here. Keep a local ref so
+        # we can still cancel/join the real loop task.
+        loop_task = self._loop_task or loop_task_ref
+        if loop_task and not loop_task.done():
+            loop_task.cancel()
+            try:
+                await loop_task
+            except asyncio.CancelledError:
+                pass
+        self._loop_task = None
 
     async def _interruptible_sleep(self, seconds: float):
         """Sleep that wakes immediately when a microcycle is scheduled or wake_event fires."""
+        self._touch_loop_heartbeat()
         self._wake_event.clear()
         # Wake on either: microcycle scheduled OR interval changed (wake_event)
         done, pending = await asyncio.wait(
@@ -337,6 +482,7 @@ class Heartbeat:
                 await task
             except asyncio.CancelledError:
                 pass
+        self._touch_loop_heartbeat()
 
     def _is_sleep_window(self) -> bool:
         """Check if current time is 03:00-06:00 JST."""
@@ -365,6 +511,7 @@ class Heartbeat:
         return elapsed >= 14400  # 4 hours
 
     async def _main_loop(self):
+        self._touch_loop_heartbeat()
         # Run one idle cycle immediately on startup — but ONLY if not already
         # engaged (terminal pre-sets engagement + schedules a microcycle for
         # the visitor_connect event; running an idle cycle here would eat that
@@ -382,6 +529,7 @@ class Heartbeat:
 
         while self.running:
             try:
+                self._touch_loop_heartbeat()
                 # ── Microcycle has top priority (even during sleep window) ──
                 # This MUST be checked before sleep to prevent deferral loops
                 # from starving visitor messages during 03:00-06:00 JST.
