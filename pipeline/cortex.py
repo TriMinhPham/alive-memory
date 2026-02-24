@@ -38,11 +38,16 @@ CIRCUIT_OPEN_SECONDS = cfg('cortex.circuit_open_seconds', 300)
 def _check_circuit() -> bool:
     """Returns True if circuit is open (should NOT call API)."""
     global _consecutive_failures, _circuit_open_until
-    if _circuit_open_until > 0 and time.monotonic() < _circuit_open_until:
+    if _circuit_open_until <= 0:
+        return False
+
+    now = time.monotonic()
+    if now < _circuit_open_until:
         return True
-    if _circuit_open_until > 0 and time.monotonic() >= _circuit_open_until:
-        _circuit_open_until = 0.0
-        _consecutive_failures = 0
+
+    # Cooldown elapsed: auto-reset even without an intermediate success.
+    _circuit_open_until = 0.0
+    _consecutive_failures = 0
     return False
 
 
