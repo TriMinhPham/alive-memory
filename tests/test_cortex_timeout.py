@@ -304,3 +304,28 @@ async def test_circuit_breaker_opens_after_consecutive_failures():
     assert isinstance(result, CortexOutput)
     # Should be near-instant (no API call)
     assert elapsed < 0.1
+
+
+@pytest.mark.asyncio
+async def test_circuit_breaker_auto_resets_after_cooldown_without_success():
+    """Expired open window resets circuit before the next API attempt."""
+    import pipeline.cortex as cortex
+
+    cortex._consecutive_failures = cortex.MAX_CONSECUTIVE_FAILURES
+    cortex._circuit_open_until = time.monotonic() - 1
+
+    with patch("pipeline.cortex.llm_complete",
+               return_value=_make_llm_response(VALID_RESPONSE_JSON)) as mock_llm:
+        result = await cortex.cortex_call(
+            routing=_make_routing(),
+            perceptions=[_make_perception()],
+            memory_chunks=[],
+            conversation=[],
+            drives=_make_drives(),
+        )
+
+    assert isinstance(result, CortexOutput)
+    assert result.dialogue == "Hello."
+    assert mock_llm.call_count == 1
+    assert cortex._circuit_open_until == 0.0
+    assert cortex._consecutive_failures == 0
