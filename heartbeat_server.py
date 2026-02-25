@@ -134,6 +134,8 @@ class ShopkeeperServer:
         if self._agent_config_dir:
             api_keys_path = os.path.join(self._agent_config_dir, 'api_keys.json')
         self._api_key_manager = ApiKeyManager(api_keys_path)
+        # Register API key manager with dashboard routes for multi-agent auth
+        dashboard_routes.set_api_key_manager(self._api_key_manager)
 
         self.connections: dict[str, asyncio.StreamWriter] = {}  # visitor_id → writer
         self._server = None

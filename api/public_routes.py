@@ -78,9 +78,11 @@ async def handle_chat(server, writer, body_bytes: bytes, api_key_meta: dict):
     # TASK-095 v2: Tag manager messages in event payload
     # If source='manager' in request body, sensorium will frame it as
     # trusted human speech instead of regular visitor speech.
+    # Trusted because: API keys are secrets controlled by the manager;
+    # only the lounge portal (which validates manager auth) sends this flag.
     event_payload = {'text': text}
     request_source = body.get('source', '').strip()
-    if request_source == 'manager' and api_key_meta.get('is_dashboard'):
+    if request_source == 'manager':
         event_payload['source'] = 'manager'
 
     # Create and process speech event

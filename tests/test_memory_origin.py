@@ -261,9 +261,9 @@ class TestGetMemoriesByOrigin(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]['origin'], 'organic')
 
-        # Verify query filters by origin
+        # Verify query filters by origin (uses COALESCE for LEFT JOIN)
         sql = mock_db.execute.call_args[0][0]
-        self.assertIn("o.origin = ?", sql)
+        self.assertIn("COALESCE(o.origin, 'organic') = ?", sql)
         params = mock_db.execute.call_args[0][1]
         self.assertEqual(params[0], 'organic')
 

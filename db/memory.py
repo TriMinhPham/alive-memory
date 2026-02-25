@@ -1149,13 +1149,19 @@ async def insert_cold_embedding(
     async with _write_lock:
         conn = await _connection.get_db()
 
-        # Dedupe guard: skip if already embedded
+        # Dedupe guard: skip embedding if already embedded, but still ensure origin
         cursor = await conn.execute(
             "SELECT 1 FROM cold_memory_vec WHERE source_type = ? AND source_id = ?",
             (source_type, source_id)
         )
         if await cursor.fetchone():
-            return  # already embedded
+            # Already embedded — ensure origin row exists (may be missing for legacy rows)
+            await conn.execute(
+                "INSERT OR IGNORE INTO cold_memory_origin (source_id, origin) VALUES (?, ?)",
+                (source_id, origin)
+            )
+            await conn.commit()
+            return
 
         await conn.execute(
             """INSERT INTO cold_memory_vec
@@ -1457,10 +1463,10 @@ async def get_cold_memories_by_origin(
     conn = await _connection.get_db()
     cursor = await conn.execute(
         """SELECT v.source_type, v.source_id, v.text_content, v.ts_iso,
-                  o.origin
+                  COALESCE(o.origin, 'organic') AS origin
            FROM cold_memory_vec v
-           INNER JOIN cold_memory_origin o ON o.source_id = v.source_id
-           WHERE o.origin = ?
+           LEFT JOIN cold_memory_origin o ON o.source_id = v.source_id
+           WHERE COALESCE(o.origin, 'organic') = ?
            ORDER BY v.ts_iso DESC
            LIMIT ? OFFSET ?""",
         (origin, limit, offset),

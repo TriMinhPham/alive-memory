@@ -42,9 +42,6 @@ export async function POST(request: Request) {
   try {
     const body: CreateAgentRequest = await request.json();
 
-    if (!body.name?.trim()) {
-      return NextResponse.json({ error: 'name required' }, { status: 400 });
-    }
     if (!body.openrouter_key?.trim()) {
       return NextResponse.json({ error: 'openrouter_key required' }, { status: 400 });
     }
@@ -53,7 +50,8 @@ export async function POST(request: Request) {
     const port = await db.getNextPort();
 
     // Create agent record
-    const agent = await db.createAgent(body.name.trim(), managerId, port, body.openrouter_key.trim());
+    const agentName = body.name?.trim() || 'Unnamed';
+    const agent = await db.createAgent(agentName, managerId, port, body.openrouter_key.trim());
 
     // Create initial API key
     const apiKey = await db.createApiKey(agent.id, 'default');
