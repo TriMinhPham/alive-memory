@@ -8,6 +8,5 @@ CREATE TABLE IF NOT EXISTS cold_memory_origin (
     -- Values: 'organic' (self-generated), 'manager_injected' (backstory from manager)
 );
 
--- Backfill: all pre-existing cold memories are organic (self-generated).
-INSERT OR IGNORE INTO cold_memory_origin (source_id, origin)
-SELECT source_id, 'organic' FROM cold_memory_vec;
+-- Backfill moved to init_db() (runs after vec table creation).
+-- Migration must not reference cold_memory_vec which is created later.
