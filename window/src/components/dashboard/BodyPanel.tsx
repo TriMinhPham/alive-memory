@@ -112,9 +112,7 @@ export default function BodyPanel() {
                 <StatusDot enabled={cap.enabled} ready={cap.ready} coolingUntil={cap.cooling_until} />
                 <span className="text-neutral-300">{cap.action}</span>
               </div>
-              <div className="text-neutral-500">
-                <span className="w-8 text-right">{countMap[cap.action] || 0}x</span>
-              </div>
+              <span className="inline-block w-8 text-right text-neutral-500">{countMap[cap.action] || 0}x</span>
             </div>
           ))}
         </div>
