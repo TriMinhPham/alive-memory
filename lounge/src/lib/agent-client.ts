@@ -106,11 +106,13 @@ export async function chatWithAgent(
   port: number,
   apiKey: string,
   message: string,
-  visitorId?: string
+  visitorId?: string,
+  source?: string
 ): Promise<Record<string, unknown> | null> {
   try {
     const body: Record<string, string> = { message };
     if (visitorId) body.visitor_id = visitorId;
+    if (source) body.source = source;
 
     const res = await fetch(`http://127.0.0.1:${port}/api/chat`, {
       method: 'POST',
