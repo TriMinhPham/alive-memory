@@ -5,7 +5,7 @@ taste:
   scarcity:
     browse_slots_per_day: 3
     inventory_cap: 20
-    daily_capital: 500
+    daily_capital: 100000
 
   feedback:
     outcome_delay_cycles: 50
