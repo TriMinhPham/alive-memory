@@ -17,11 +17,25 @@ import time
 import clock
 import db
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from api.api_auth import ApiKeyManager
+
 
 # ─── Token management ───
 
 _dashboard_tokens: dict[str, float] = {}
 _DASHBOARD_TOKEN_TTL = 86400  # 24 hours
+
+# Multi-agent mode: API keys can also authenticate dashboard requests.
+# Set via set_api_key_manager() during server init.
+_api_key_manager: 'ApiKeyManager | None' = None
+
+
+def set_api_key_manager(manager: 'ApiKeyManager') -> None:
+    """Register the API key manager for dashboard auth fallback."""
+    global _api_key_manager
+    _api_key_manager = manager
 
 
 def _create_dashboard_token() -> str:
@@ -49,13 +63,24 @@ def _check_dashboard_token(token: str) -> bool:
 
 
 def check_dashboard_auth(authorization: str) -> bool:
-    """Extract Bearer token from Authorization header and validate."""
+    """Extract Bearer token from Authorization header and validate.
+
+    Accepts either a dashboard session token (from password auth) or a valid
+    API key (multi-agent/lounge context where the portal proxies with API keys).
+    """
     if not authorization:
         return False
     parts = authorization.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != 'bearer':
         return False
-    return _check_dashboard_token(parts[1])
+    token = parts[1]
+    # Primary: dashboard session token
+    if _check_dashboard_token(token):
+        return True
+    # Fallback: API key (multi-agent mode — lounge proxy sends API keys)
+    if _api_key_manager and _api_key_manager.validate(token) is not None:
+        return True
+    return False
 
 
 # ─── Rate limiting ───
@@ -1462,8 +1487,9 @@ async def handle_toggle_capability(server, writer: asyncio.StreamWriter,
 
     # Build updated actions list
     if identity.actions_enabled is None:
-        # Was None (all allowed) — switch to explicit list from registry
-        current_enabled = list(ACTION_REGISTRY.keys())
+        # Was None (all allowed) — switch to explicit list, respecting
+        # each capability's default enabled state from the registry
+        current_enabled = [name for name, cap in ACTION_REGISTRY.items() if cap.enabled]
     else:
         current_enabled = list(identity.actions_enabled)
 

@@ -7,3 +7,7 @@ CREATE TABLE IF NOT EXISTS cold_memory_origin (
     origin TEXT NOT NULL DEFAULT 'organic'
     -- Values: 'organic' (self-generated), 'manager_injected' (backstory from manager)
 );
+
+-- Backfill: all pre-existing cold memories are organic (self-generated).
+INSERT OR IGNORE INTO cold_memory_origin (source_id, origin)
+SELECT source_id, 'organic' FROM cold_memory_vec;
