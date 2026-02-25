@@ -493,6 +493,16 @@ async def init_db():
                 )
             """)
             await db.commit()
+            # Backfill origin table for pre-existing cold memories (migration 094
+            # cannot reference cold_memory_vec because it's created here, after migrations).
+            try:
+                await db.execute(
+                    "INSERT OR IGNORE INTO cold_memory_origin (source_id, origin) "
+                    "SELECT source_id, 'organic' FROM cold_memory_vec"
+                )
+                await db.commit()
+            except Exception:
+                pass  # cold_memory_origin table may not exist yet on first run
         except Exception as e:
             print(f"[DB] Failed to create cold_memory_vec table: {e}")
 
