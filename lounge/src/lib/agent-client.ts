@@ -102,6 +102,29 @@ export async function dashboardDelete(
   }
 }
 
+export async function getConversationHistory(
+  port: number,
+  apiKey: string,
+  visitorId: string,
+  limit: number = 50
+): Promise<{ messages: { role: string; text: string; ts: string }[]; visitor_id: string } | null> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/conversation-history`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ visitor_id: visitorId, limit }),
+      signal: AbortSignal.timeout(AGENT_TIMEOUT),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 export async function chatWithAgent(
   port: number,
   apiKey: string,

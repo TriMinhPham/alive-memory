@@ -1313,6 +1313,12 @@ class ShopkeeperServer:
                     await self._http_json(writer, 401, {'error': 'invalid or missing API key'})
                 else:
                     await public_routes.handle_public_state(self, writer, api_meta)
+            elif path == '/api/conversation-history' and method == 'POST':
+                api_meta = self._check_api_key(authorization)
+                if api_meta is None:
+                    await self._http_json(writer, 401, {'error': 'invalid or missing API key'})
+                else:
+                    await public_routes.handle_conversation_history(self, writer, body_bytes, api_meta)
             else:
                 await self._http_json(writer, 404, {'error': 'not found'})
         except (asyncio.TimeoutError, ConnectionResetError, BrokenPipeError):
