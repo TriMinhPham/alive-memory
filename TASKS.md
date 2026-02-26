@@ -1622,6 +1622,29 @@ No changes to engagement FSM, ACK path, or channel routing (already automatic vi
 
 ---
 
+### TASK-098: Lounge conversation persistence
+**Status:** READY
+**Priority:** Medium
+**Description:** Lounge chat messages are stored in the agent's `conversation_log` SQLite table but lost on frontend reload. Two root causes:
+
+1. **Ephemeral visitor ID** — `visitorId = lounge-${Date.now()}` generates a new ID on every page load, so the backend treats each visit as a new person. Fix: store a stable visitor ID in localStorage, scoped per agent.
+2. **No history loading** — frontend initializes with `useState([])` and never fetches past messages. Fix: add a `/api/conversation-history` endpoint on the agent container, proxy it through the lounge API, and load previous messages on mount.
+
+**Scope (files you may touch):**
+- `lounge/src/app/agent/[id]/lounge/page.tsx` (stable visitor ID + load history on mount)
+- `lounge/src/app/api/agents/[id]/history/route.ts` (new — proxy route for conversation history)
+- `lounge/src/lib/agent-client.ts` (add `getConversationHistory()` method)
+- `api/public_routes.py` (add `/api/conversation-history` endpoint returning messages for a visitor_id)
+**Scope (files you may NOT touch):**
+- `db.py` (use existing `get_recent_conversation()` in `db/memory.py`)
+- `pipeline/*`
+- `heartbeat.py`
+- `config/identity.py`
+**Tests:** Conversation history loads on page refresh. Same visitor ID used across reloads for the same agent. New messages appear after old ones. Empty state still works for first visit.
+**Definition of done:** Manager can chat with an agent, refresh the page, and see the full conversation history. Visitor ID is stable per agent per browser.
+
+---
+
 ```markdown
 ### TASK-XXX: Title
 **Status:** BACKLOG

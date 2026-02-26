@@ -135,6 +135,38 @@ async def handle_chat(server, writer, body_bytes: bytes, api_key_meta: dict):
         })
 
 
+async def handle_conversation_history(server, writer, body_bytes: bytes, api_key_meta: dict):
+    """Handle POST /api/conversation-history — return past messages for a visitor.
+
+    Request body: {"visitor_id": "lounge-xxx", "limit": 50}
+    Response: {"messages": [{"role": "visitor", "text": "...", "ts": "..."}, ...]}
+    """
+    try:
+        body = json.loads(body_bytes)
+    except (json.JSONDecodeError, ValueError):
+        await server._http_json(writer, 400, {'error': 'invalid JSON body'})
+        return
+
+    visitor_id = body.get('visitor_id', '').strip()
+    if not visitor_id:
+        await server._http_json(writer, 400, {'error': 'visitor_id required'})
+        return
+
+    limit = min(int(body.get('limit', 50)), 200)
+
+    conn = await db._connection.get_db()
+    cursor = await conn.execute(
+        "SELECT role, text, ts FROM conversation_log "
+        "WHERE visitor_id = ? AND NOT (role = 'system' AND text = '__session_boundary__') "
+        "ORDER BY ts ASC LIMIT ?",
+        (visitor_id, limit)
+    )
+    rows = await cursor.fetchall()
+    messages = [{'role': r['role'], 'text': r['text'], 'ts': r['ts']} for r in rows]
+
+    await server._http_json(writer, 200, {'messages': messages, 'visitor_id': visitor_id})
+
+
 async def handle_public_state(server, writer, api_key_meta: dict):
     """Handle GET /api/public-state — return agent's public-facing state.
 

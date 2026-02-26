@@ -94,8 +94,20 @@ export default function LoungePage({
   const [showMemoryPanel, setShowMemoryPanel] = useState(false);
   const [sleeping, setSleeping] = useState(false);
   const [sleepConfirm, setSleepConfirm] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const messagesEnd = useRef<HTMLDivElement>(null);
-  const visitorId = useRef(`lounge-${Date.now()}`);
+
+  // Stable visitor ID: persist per agent in localStorage
+  const visitorId = useRef("");
+  if (!visitorId.current && typeof window !== "undefined") {
+    const storageKey = `lounge-visitor-${id}`;
+    let stored = localStorage.getItem(storageKey);
+    if (!stored) {
+      stored = `lounge-${Date.now()}`;
+      localStorage.setItem(storageKey, stored);
+    }
+    visitorId.current = stored;
+  }
 
   const fetchState = useCallback(async () => {
     try {
@@ -111,6 +123,41 @@ export default function LoungePage({
     const interval = setInterval(fetchState, 15000);
     return () => clearInterval(interval);
   }, [fetchState]);
+
+  // Load conversation history on mount
+  useEffect(() => {
+    if (!visitorId.current || historyLoaded) return;
+    async function loadHistory() {
+      try {
+        const res = await fetch(`/api/agents/${id}/history`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            visitor_id: visitorId.current,
+            limit: 100,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.messages && data.messages.length > 0) {
+            const restored: Message[] = data.messages
+              .filter((m: { role: string; text: string }) => m.role !== "system")
+              .map((m: { role: string; text: string; ts: string }) => ({
+                role: m.role === "visitor" ? "user" : "agent",
+                text: m.text,
+                timestamp: m.ts,
+              }));
+            setMessages(restored);
+          }
+        }
+      } catch {
+        // History load failed silently — user just sees empty chat
+      } finally {
+        setHistoryLoaded(true);
+      }
+    }
+    loadHistory();
+  }, [id, historyLoaded]);
 
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
