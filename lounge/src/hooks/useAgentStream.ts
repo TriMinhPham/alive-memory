@@ -121,7 +121,7 @@ export function useAgentStream(agentId: string) {
   const pollInnerVoice = useCallback(async () => {
     if (!mountedRef.current) return;
     try {
-      const res = await fetch(`/api/agents/${agentId}/inner-voice`);
+      const res = await fetch(`/api/agents/${agentId}/inner-voice?limit=20`);
       // Silently ignore failures — inner-voice does NOT affect connection state
       if (!res.ok) return;
       const data = await res.json();
