@@ -258,6 +258,10 @@ function StreamSection({
         `/api/agents/${agentId}/feed/streams/${streamId}`,
         { method: "DELETE" }
       );
+      if (res.status === 404) {
+        setNotAvailable(true);
+        return;
+      }
       if (res.ok || res.status === 204) {
         await fetchStreams();
       }

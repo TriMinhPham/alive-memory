@@ -157,19 +157,16 @@ function formatCapName(name: string): string {
 function ChannelSection({ agentId }: { agentId: string }) {
   const [channels, setChannels] = useState<ChannelStatus[]>([]);
   const [loading, setLoading] = useState(true);
-  const [notAvailable, setNotAvailable] = useState(false);
 
   const fetchChannels = useCallback(async () => {
     try {
       const res = await fetch(`/api/agents/${agentId}/channels`);
-      if (res.status === 404) {
-        setNotAvailable(true);
-        return;
-      }
       if (res.ok) {
         const data = await res.json();
         setChannels(data.channels || []);
       }
+      // 404 / 502 — just show empty list; no separate "coming soon" gate
+      // because the channels route synthesizes data when agent is online
     } catch {
       // silent
     } finally {
@@ -180,17 +177,6 @@ function ChannelSection({ agentId }: { agentId: string }) {
   useEffect(() => {
     fetchChannels();
   }, [fetchChannels]);
-
-  if (notAvailable) {
-    return (
-      <div className="p-3 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
-        <h3 className="text-xs font-medium text-[#9a8c7a] mb-1">Channels</h3>
-        <p className="text-xs text-[#525252]">
-          Channel monitoring coming soon
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-3">

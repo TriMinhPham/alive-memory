@@ -55,13 +55,22 @@ export async function GET(
     dashboardFetchRaw(agent.port, apiKey, 'GET', 'capabilities'),
   ]);
 
+  // If both sub-fetches returned 404, the engine doesn't support channels yet
+  if (feedsResult.status === 404 && capsResult.status === 404) {
+    return NextResponse.json({ error: 'not available yet' }, { status: 404 });
+  }
+
   const feeds = feedsResult.status >= 200 && feedsResult.status < 300
     ? feedsResult.data : null;
   const capabilities = capsResult.status >= 200 && capsResult.status < 300
     ? capsResult.data : null;
 
-  // Build channel status summary
-  const feedArr = Array.isArray(feeds) ? feeds : [];
+  // Extract feed array — handle both array and { streams: [...] } forms
+  const feedArr = Array.isArray(feeds)
+    ? feeds
+    : (feeds && typeof feeds === 'object' && 'streams' in feeds && Array.isArray((feeds as Record<string, unknown>).streams))
+      ? (feeds as Record<string, unknown>).streams as Record<string, unknown>[]
+      : [];
   const channels = [
     {
       channel: 'api',
