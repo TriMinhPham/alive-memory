@@ -275,6 +275,8 @@ export async function syncApiKeysToAgent(agentId: string): Promise<void> {
       rate_limit: k.rate_limit,
     }));
     fs.writeFileSync(keysPath, JSON.stringify(payload, null, 2) + '\n');
+    // Container runs as appuser (UID 1000) — ensure file is readable
+    try { fs.chownSync(keysPath, 1000, 1000); } catch { /* non-root env */ }
   } catch {
     // Agent config dir may not exist yet (pre-container-start); skip silently
   }
