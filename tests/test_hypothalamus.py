@@ -55,10 +55,10 @@ class TestDrivesToFeeling:
         feeling = drives_to_feeling(d)
         assert "write" in feeling.lower() or "building" in feeling.lower()
 
-    def test_neutral_state_steady(self):
-        d = DrivesState()  # defaults
+    def test_neutral_state_sharp_or_steady(self):
+        d = DrivesState()  # defaults: energy=0.8, ≥0.6 threshold → "sharp"
         feeling = drives_to_feeling(d)
-        assert "steady" in feeling.lower()
+        assert "sharp" in feeling.lower() or "steady" in feeling.lower()
 
     def test_negative_mood_dim(self):
         d = DrivesState(mood_valence=-0.7)

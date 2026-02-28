@@ -73,8 +73,11 @@ async def update_drives(
     # but this baseline ensures curiosity doesn't floor-pin when alone.
     new.diversive_curiosity = clamp(new.diversive_curiosity + p('hypothalamus.time_decay.curiosity_per_hour') * elapsed_hours)
     new.expression_need = clamp(new.expression_need + p('hypothalamus.time_decay.expression_per_hour') * elapsed_hours)
-    # NOTE: energy field is now a display-only derived value from real-dollar
-    # budget (TASK-050). No time-based decay or homeostatic pull on energy.
+    # Energy = budget ratio (remaining / total). Passed via cycle_context.
+    # No time-based decay or homeostatic pull — purely derived from real-dollar budget.
+    budget_ratio = (cycle_context or {}).get('budget_ratio')
+    if budget_ratio is not None:
+        new.energy = clamp(budget_ratio)
 
     # Rest need builds with time — she gets tired just from being awake
     # Faster when engaged (+0.06/hr), slower when idle (+0.03/hr)
@@ -252,10 +255,12 @@ def drives_to_feeling(d: DrivesState,
     elif d.social_hunger < cfg('hypothalamus.feeling_social_low', 0.2):
         parts.append("I've had enough interaction for now. I need some quiet.")
 
-    # Energy
-    if d.energy < cfg('hypothalamus.feeling_energy_low', 0.3):
+    # Energy (derived from budget ratio)
+    if d.energy < cfg('hypothalamus.feeling_energy_exhausted', 0.1):
+        parts.append("I'm exhausted. I can barely think.")
+    elif d.energy < cfg('hypothalamus.feeling_energy_low', 0.3):
         parts.append("I'm tired. Everything feels heavy today.")
-    elif d.energy > cfg('hypothalamus.feeling_energy_high', 0.8):
+    elif d.energy >= cfg('hypothalamus.feeling_energy_high', 0.6):
         parts.append("I feel sharp and present.")
 
     # Diversive curiosity (TASK-043)

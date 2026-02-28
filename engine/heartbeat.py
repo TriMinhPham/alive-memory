@@ -1093,10 +1093,14 @@ class Heartbeat:
             e.event_type in ('visitor_speech', 'visitor_connect')
             for e in unread
         )
+        # Budget ratio for energy display (query early so drives_to_feeling sees it)
+        budget_info_early = await db.get_budget_remaining()
+        budget_ratio = budget_info_early['remaining'] / max(budget_info_early['budget'], 1e-6)
         cycle_context = {
             'consecutive_idle': self._consecutive_idle,
             'engaged_this_cycle': has_engagement_events,
             'expression_taken': self._last_expression_taken,
+            'budget_ratio': budget_ratio,
         }
         drives, feelings = await update_drives(
             drives, elapsed, unread, cortex_flags or None,
@@ -1205,8 +1209,8 @@ class Heartbeat:
             'memory_count': len(memory_chunks),
         })
 
-        # Budget state for this cycle (for governor + evidence pack joins)
-        budget_info = await db.get_budget_remaining()
+        # Budget state for this cycle (reuse early query from drives update)
+        budget_info = budget_info_early
         budget_mode = 'normal'
         if budget_info['remaining'] <= 0:
             budget_mode = 'emergency'
@@ -1418,8 +1422,7 @@ class Heartbeat:
             clear_cycle_context()
             return rest_log
 
-        # Update energy display value: remaining / budget ratio
-        drives.energy = clamp(budget_info['remaining'] / max(budget_info['budget'], 1e-6))
+        # Energy already set by update_drives via budget_ratio in cycle_context
 
         # 7. URL enrichment (if gift detected — URLs captured before gate)
         gift_meta = None
