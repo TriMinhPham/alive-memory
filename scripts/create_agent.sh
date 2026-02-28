@@ -46,7 +46,9 @@ echo "Creating agent: $AGENT_ID (port $PORT)"
 # Container runs as appuser (UID 1000) — writable dirs need matching ownership.
 mkdir -p "$AGENT_DIR/db"
 mkdir -p "$AGENT_DIR/memory"
-chown -R 1000:1000 "$AGENT_DIR/db" "$AGENT_DIR/memory"
+# Chown entire agent dir — container runs as appuser (UID 1000) and needs
+# write access to identity.yaml (for capability toggles), api_keys.json, etc.
+chown -R 1000:1000 "$AGENT_DIR"
 
 # Create default identity.yaml if not present — uses digital lifeform template
 if [ ! -f "$AGENT_DIR/identity.yaml" ]; then
