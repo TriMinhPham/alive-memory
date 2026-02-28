@@ -157,6 +157,8 @@ export async function PATCH(
         })
         .join('\n\n');
       fs.writeFileSync(identityPath, yaml + '\n');
+      // Container runs as appuser (UID 1000) — needs write access for capability toggles
+      try { fs.chownSync(identityPath, 1000, 1000); } catch { /* non-root env */ }
     }
 
     // Restart container to pick up changes
