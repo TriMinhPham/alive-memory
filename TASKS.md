@@ -2236,7 +2236,7 @@ Fix:
 ---
 
 ### TASK-115: Event Bus — Foundation
-**Status:** READY
+**Status:** DONE (2026-03-01)
 **Priority:** High
 **Proposal:** `tasks/PROPOSAL-alive-infra-roadmap.md` Phase 2, Sub-phase 1
 **Description:** Create the in-process async pub/sub event bus. `asyncio.Queue`-backed topic routing with typed messages. Not Redis/NATS — in-process only, forever. Wire `Heartbeat` to publish through bus while keeping old callbacks as bus subscribers (compatibility shim). Zero test changes in this task.
