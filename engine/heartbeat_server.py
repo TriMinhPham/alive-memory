@@ -197,16 +197,12 @@ class ShopkeeperServer:
 
     async def start(self):
         """Initialize DB, seed, start heartbeat, TCP, WebSocket, and HTTP servers."""
-        # Check API key
-        if not os.environ.get('OPENROUTER_API_KEY'):
-            print(f"\n  {Fore.RED}[Error]{Style.RESET_ALL} OPENROUTER_API_KEY not set.")
-            print(f"  Run: export OPENROUTER_API_KEY='sk-or-v1-...'")
-            return
-
-        if not self._server_token:
-            print(f"\n  {Fore.RED}[Error]{Style.RESET_ALL} {TOKEN_ENV_VAR} not set.")
-            print(f"  Run: export {TOKEN_ENV_VAR}='a-long-random-token'")
-            return
+        # Run preflight checks (env vars, ports, config, packages)
+        from preflight import run_preflight
+        if not run_preflight(http_port=HTTP_PORT, ws_port=WS_PORT):
+            print(f"\n  {Fore.RED}[Preflight]{Style.RESET_ALL} "
+                  f"Fix the errors above and restart.")
+            sys.exit(1)
 
         if not os.environ.get('DASHBOARD_PASSWORD'):
             print(f"  {Fore.YELLOW}[Warning]{Style.RESET_ALL} "

@@ -1,18 +1,36 @@
 #!/bin/bash
 # create_agent.sh — Create and start a new ALIVE agent
 #
-# Usage: ./scripts/create_agent.sh <agent_id> <port> <openrouter_api_key>
+# Usage: ./scripts/create_agent.sh [--force] [--validate] <agent_id> <port> <openrouter_api_key>
 # Example: ./scripts/create_agent.sh hina 9001 sk-or-v1-xxxxx
+#          ./scripts/create_agent.sh --force hina 9001 sk-or-v1-xxxxx
+#          ./scripts/create_agent.sh --validate hina 9001 sk-or-v1-xxxxx
+#
+# Flags:
+#   --force     If container exists, stop and recreate (preserves db/ and memory/)
+#   --validate  Run preflight checks without starting the container
 
 set -euo pipefail
 
-AGENT_ID="${1:?Usage: create_agent.sh <agent_id> <port> <openrouter_api_key>}"
-PORT="${2:?Usage: create_agent.sh <agent_id> <port> <openrouter_api_key>}"
-API_KEY="${3:?Usage: create_agent.sh <agent_id> <port> <openrouter_api_key>}"
+# Parse flags
+FORCE=false
+VALIDATE=false
+while [[ "${1:-}" == --* ]]; do
+    case "$1" in
+        --force)    FORCE=true; shift ;;
+        --validate) VALIDATE=true; shift ;;
+        *)          echo "ERROR: Unknown flag: $1"; exit 1 ;;
+    esac
+done
+
+AGENT_ID="${1:?Usage: create_agent.sh [--force] [--validate] <agent_id> <port> <openrouter_api_key>}"
+PORT="${2:?Usage: create_agent.sh [--force] [--validate] <agent_id> <port> <openrouter_api_key>}"
+API_KEY="${3:?Usage: create_agent.sh [--force] [--validate] <agent_id> <port> <openrouter_api_key>}"
 
 DATA_DIR="/data/alive-agents"
 AGENT_DIR="$DATA_DIR/$AGENT_ID"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONTAINER_NAME="alive-agent-${AGENT_ID}"
 
 # Validate agent_id (alphanumeric + hyphens only)
 if [[ ! "$AGENT_ID" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
@@ -20,22 +38,81 @@ if [[ ! "$AGENT_ID" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
     exit 1
 fi
 
-# Check for existing container
-if docker ps -a --format '{{.Names}}' | grep -q "^alive-agent-${AGENT_ID}$"; then
-    echo "ERROR: Agent '$AGENT_ID' already exists. Destroy first: ./scripts/destroy_agent.sh $AGENT_ID"
-    exit 1
-fi
-
-# Check port not in use
-if ss -tlnp | grep -q ":${PORT} "; then
-    echo "ERROR: Port $PORT already in use"
-    exit 1
-fi
-
-# Check image exists
+# Check image exists BEFORE any teardown (don't destroy a working container
+# only to discover the image is missing)
 if ! docker image inspect alive-engine:latest >/dev/null 2>&1; then
     echo "ERROR: alive-engine:latest image not found. Build first: docker build -t alive-engine:latest ."
     exit 1
+fi
+
+# Handle existing container
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    if [ "$FORCE" = true ]; then
+        echo "  --force: stopping existing container '$CONTAINER_NAME'"
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+        docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    elif [ "$VALIDATE" = true ]; then
+        # For --validate with existing container, we can run preflight inside
+        # the existing container without disturbing it. See below.
+        :
+    else
+        echo "ERROR: Agent '$AGENT_ID' already exists. Destroy first: ./scripts/destroy_agent.sh $AGENT_ID"
+        echo "  Or use --force to replace it (preserves db/ and memory/)"
+        exit 1
+    fi
+fi
+
+# Check port not in use (AFTER teardown — in --force mode the old container was using this port)
+if [ "$VALIDATE" != true ]; then
+    if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+        echo "ERROR: Port $PORT already in use"
+        exit 1
+    fi
+fi
+
+# --validate: run preflight checks and exit
+if [ "$VALIDATE" = true ]; then
+    echo "Validating agent: $AGENT_ID (port $PORT)"
+
+    # Check if container already exists and is running
+    WAS_RUNNING=false
+    if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        WAS_RUNNING=true
+    fi
+
+    if [ "$WAS_RUNNING" = true ]; then
+        # Run preflight inside the already-running container
+        echo "  Container is running — validating inside existing container"
+        docker exec "$CONTAINER_NAME" \
+            python -c "from preflight import run_preflight; import sys; sys.exit(0 if run_preflight() else 1)"
+        PREFLIGHT_RC=$?
+    elif docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        # Container exists but stopped — start temporarily
+        echo "  Starting stopped container for validation..."
+        docker start "$CONTAINER_NAME" >/dev/null 2>&1
+        sleep 2
+        docker exec "$CONTAINER_NAME" \
+            python -c "from preflight import run_preflight; import sys; sys.exit(0 if run_preflight() else 1)"
+        PREFLIGHT_RC=$?
+        echo "  Stopping container (was not running before validate)"
+        docker stop "$CONTAINER_NAME" >/dev/null 2>&1
+    else
+        # No container — create a temporary one for validation
+        echo "  No container found — creating temporary container for validation"
+        mkdir -p "$AGENT_DIR/db" "$AGENT_DIR/memory"
+        SERVER_TOKEN="$(openssl rand -hex 32)"
+        docker run --rm --name "${CONTAINER_NAME}-validate" \
+            -v "$AGENT_DIR/:/agent-config/" \
+            -e "AGENT_ID=${AGENT_ID}" \
+            -e "OPENROUTER_API_KEY=${API_KEY}" \
+            -e "AGENT_CONFIG_DIR=/agent-config/" \
+            -e "SHOPKEEPER_SERVER_TOKEN=${SERVER_TOKEN}" \
+            alive-engine:latest \
+            python -c "from preflight import run_preflight; import sys; sys.exit(0 if run_preflight() else 1)"
+        PREFLIGHT_RC=$?
+    fi
+
+    exit "$PREFLIGHT_RC"
 fi
 
 echo "Creating agent: $AGENT_ID (port $PORT)"
@@ -116,7 +193,7 @@ SERVER_TOKEN="$(openssl rand -hex 32)"
 # Mount $AGENT_DIR as /agent-config (NOT /app/config — that would overlay
 # the Python config package and break imports like config.agent_identity).
 docker run -d \
-    --name "alive-agent-${AGENT_ID}" \
+    --name "$CONTAINER_NAME" \
     -p "${PORT}:8080" \
     -v "$AGENT_DIR/:/agent-config/" \
     -e "AGENT_ID=${AGENT_ID}" \
@@ -128,14 +205,14 @@ docker run -d \
     --cpus 0.5 \
     alive-engine:latest
 
-echo "  Container started: alive-agent-${AGENT_ID}"
+echo "  Container started: $CONTAINER_NAME"
 
 # Wait for health
 echo -n "  Waiting for agent to start"
 for i in $(seq 1 30); do
     if curl -s "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
         echo ""
-        echo "  ✅ Agent '$AGENT_ID' is healthy on port $PORT"
+        echo "  Agent '$AGENT_ID' is healthy on port $PORT"
         break
     fi
     echo -n "."
@@ -145,8 +222,8 @@ done
 # Check if we timed out
 if ! curl -s "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
     echo ""
-    echo "  ⚠️  Agent not responding after 60s. Check logs:"
-    echo "     docker logs alive-agent-${AGENT_ID} --tail 50"
+    echo "  Agent not responding after 60s. Check logs:"
+    echo "     docker logs $CONTAINER_NAME --tail 50"
 fi
 
 # Update nginx routes
@@ -159,5 +236,5 @@ echo ""
 echo "Agent '$AGENT_ID' created."
 echo "  Local:  http://127.0.0.1:${PORT}/api/state"
 echo "  Public: https://api.alive.kaikk.jp/${AGENT_ID}/state"
-echo "  Logs:   docker logs alive-agent-${AGENT_ID} -f"
+echo "  Logs:   docker logs $CONTAINER_NAME -f"
 echo "  Config: $AGENT_DIR/"
