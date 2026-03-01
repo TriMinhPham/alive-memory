@@ -2085,7 +2085,7 @@ This matters because dynamic actions are the primary signal of agent-initiated g
 ---
 
 ### TASK-110: Deploy Ergonomics — Preflight Startup Validation
-**Status:** READY
+**Status:** DONE (2026-03-01)
 **Priority:** High
 **Proposal:** `tasks/PROPOSAL-alive-infra-roadmap.md` Phase 1A
 **Description:** Create `engine/preflight.py` (~150 lines) that runs synchronously before `db.init_db()` in `heartbeat_server.py:start()`. Validates:
@@ -2120,7 +2120,7 @@ Output: numbered error list with fix instructions, or `[Preflight] OK`. Fail-lou
 ---
 
 ### TASK-111: Deploy Ergonomics — Idempotent create_agent.sh
-**Status:** READY
+**Status:** DONE (2026-03-01)
 **Priority:** High
 **Proposal:** `tasks/PROPOSAL-alive-infra-roadmap.md` Phase 1B
 **Description:** Make `scripts/create_agent.sh` idempotent with two new flags:
