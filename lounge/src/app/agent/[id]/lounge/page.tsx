@@ -11,6 +11,7 @@ import FeedTab from "@/components/FeedTab";
 import SeedTab from "@/components/SeedTab";
 import TeachTab from "@/components/TeachTab";
 import ToastNotification from "@/components/ToastNotification";
+import SettingsDrawer from "@/components/SettingsDrawer";
 
 type IOTab = "feed" | "seed" | "teach";
 type MobileTab = "mind" | "feed" | "seed" | "teach";
@@ -29,6 +30,7 @@ export default function LoungePage({
   const [sleepConfirm, setSleepConfirm] = useState(false);
   const [sleeping, setSleeping] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Fetch agent name on mount
   useEffect(() => {
@@ -80,6 +82,35 @@ export default function LoungePage({
 
   const isOffline = stream.status === "offline" || stream.status === "error";
 
+  // Tab button with bottom indicator
+  function TabButton({
+    label,
+    active,
+    onClick,
+    className,
+  }: {
+    label: string;
+    active: boolean;
+    onClick: () => void;
+    className?: string;
+  }) {
+    return (
+      <button
+        onClick={onClick}
+        className={`relative px-3 py-1.5 rounded-md text-xs capitalize transition-all min-h-[44px] md:min-h-0 ${
+          active
+            ? "bg-[#262626] text-white"
+            : "text-[#737373] hover:text-white hover:bg-[#1a1a1a]"
+        } ${className ?? ""}`}
+      >
+        {label}
+        {active && (
+          <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-[#d4a574] rounded-full transition-all" />
+        )}
+      </button>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0f] text-[#d4d4d4]">
       <LoungeTopBar
@@ -88,6 +119,8 @@ export default function LoungePage({
         isSleeping={isSleeping}
         onRestClick={() => setSleepConfirm(true)}
         onBackClick={() => window.history.back()}
+        onSettingsClick={() => setSettingsOpen(!settingsOpen)}
+        settingsOpen={settingsOpen}
       />
 
       {/* ── Desktop (xl+): 3-column layout ── */}
@@ -144,6 +177,7 @@ export default function LoungePage({
           />
           <ChatBar
             agentId={id}
+            agentName={agentName}
             status={stream.status}
             isSleeping={isSleeping}
             onSendComplete={stream.refresh}
@@ -154,27 +188,24 @@ export default function LoungePage({
         <div className="w-[280px] border-l border-[#1e1e1a] flex flex-col bg-[#0a0a0f]">
           <div className="flex gap-1 px-3 pt-3 pb-2">
             {(["feed", "seed", "teach"] as const).map((tab) => (
-              <button
+              <TabButton
                 key={tab}
+                label={tab}
+                active={ioTab === tab}
                 onClick={() => setIoTab(tab)}
-                className={`px-3 py-1.5 rounded-md text-xs capitalize transition-colors ${
-                  ioTab === tab
-                    ? "bg-[#262626] text-white"
-                    : "text-[#737373] hover:text-white"
-                }`}
-              >
-                {tab}
-              </button>
+              />
             ))}
           </div>
           <div className="flex-1 overflow-y-auto px-3 pb-3">
-            {ioTab === "feed" && (
-              <FeedTab agentId={id} status={stream.status} />
-            )}
-            {ioTab === "seed" && <SeedTab agentId={id} />}
-            {ioTab === "teach" && (
-              <TeachTab agentId={id} status={stream.status} />
-            )}
+            <div key={ioTab} className="animate-tab-fade">
+              {ioTab === "feed" && (
+                <FeedTab agentId={id} status={stream.status} onToast={setToast} />
+              )}
+              {ioTab === "seed" && <SeedTab agentId={id} onToast={setToast} />}
+              {ioTab === "teach" && (
+                <TeachTab agentId={id} status={stream.status} />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -222,6 +253,7 @@ export default function LoungePage({
           />
           <ChatBar
             agentId={id}
+            agentName={agentName}
             status={stream.status}
             isSleeping={isSleeping}
             onSendComplete={stream.refresh}
@@ -232,30 +264,27 @@ export default function LoungePage({
         <div className="w-[280px] border-l border-[#1e1e1a] flex flex-col bg-[#0a0a0f]">
           <div className="flex gap-1 px-3 pt-3 pb-2">
             {(["mind", "feed", "seed", "teach"] as const).map((tab) => (
-              <button
+              <TabButton
                 key={tab}
+                label={tab}
+                active={mobileTab === tab}
                 onClick={() => setMobileTab(tab)}
-                className={`px-2.5 py-1.5 rounded-md text-xs capitalize transition-colors ${
-                  mobileTab === tab
-                    ? "bg-[#262626] text-white"
-                    : "text-[#737373] hover:text-white"
-                }`}
-              >
-                {tab}
-              </button>
+              />
             ))}
           </div>
           <div className="flex-1 overflow-y-auto px-3 pb-3">
-            {mobileTab === "mind" && (
-              <MindPanel entries={stream.inner_voice} status={stream.status} />
-            )}
-            {mobileTab === "feed" && (
-              <FeedTab agentId={id} status={stream.status} />
-            )}
-            {mobileTab === "seed" && <SeedTab agentId={id} />}
-            {mobileTab === "teach" && (
-              <TeachTab agentId={id} status={stream.status} />
-            )}
+            <div key={mobileTab} className="animate-tab-fade">
+              {mobileTab === "mind" && (
+                <MindPanel entries={stream.inner_voice} status={stream.status} />
+              )}
+              {mobileTab === "feed" && (
+                <FeedTab agentId={id} status={stream.status} onToast={setToast} />
+              )}
+              {mobileTab === "seed" && <SeedTab agentId={id} onToast={setToast} />}
+              {mobileTab === "teach" && (
+                <TeachTab agentId={id} status={stream.status} />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -263,7 +292,7 @@ export default function LoungePage({
       {/* ── Mobile (<md): Stacked layout ── */}
       <div className="flex md:hidden flex-col flex-1 overflow-hidden">
         {/* Organism top */}
-        <div className="relative h-[35vh] shrink-0">
+        <div className="relative h-[40vh] shrink-0">
           <ConsciousnessCanvas
             mood_valence={moodValence}
             energy={energyVal}
@@ -283,7 +312,7 @@ export default function LoungePage({
               </span>
             </div>
           )}
-          <div className="absolute bottom-0 left-0 right-0">
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#0a0a0f]/80 to-transparent pt-6">
             <StateOverlay
               mood={stream.mood}
               energy={energyVal}
@@ -306,37 +335,36 @@ export default function LoungePage({
         {/* Tab buttons */}
         <div className="flex gap-1 px-3 py-2 border-t border-[#1e1e1a]">
           {(["mind", "feed", "seed", "teach"] as const).map((tab) => (
-            <button
+            <TabButton
               key={tab}
+              label={tab}
+              active={mobileTab === tab}
               onClick={() => setMobileTab(tab)}
-              className={`flex-1 py-1.5 rounded-md text-xs capitalize transition-colors ${
-                mobileTab === tab
-                  ? "bg-[#262626] text-white"
-                  : "text-[#737373] hover:text-white"
-              }`}
-            >
-              {tab}
-            </button>
+              className="flex-1"
+            />
           ))}
         </div>
 
         {/* Tab content */}
         <div className="flex-1 overflow-y-auto px-3 pb-2">
-          {mobileTab === "mind" && (
-            <MindPanel entries={stream.inner_voice} status={stream.status} />
-          )}
-          {mobileTab === "feed" && (
-            <FeedTab agentId={id} status={stream.status} />
-          )}
-          {mobileTab === "seed" && <SeedTab agentId={id} />}
-          {mobileTab === "teach" && (
-            <TeachTab agentId={id} status={stream.status} />
-          )}
+          <div key={mobileTab} className="animate-tab-fade">
+            {mobileTab === "mind" && (
+              <MindPanel entries={stream.inner_voice} status={stream.status} />
+            )}
+            {mobileTab === "feed" && (
+              <FeedTab agentId={id} status={stream.status} onToast={setToast} />
+            )}
+            {mobileTab === "seed" && <SeedTab agentId={id} onToast={setToast} />}
+            {mobileTab === "teach" && (
+              <TeachTab agentId={id} status={stream.status} />
+            )}
+          </div>
         </div>
 
         {/* Chat at bottom */}
         <ChatBar
           agentId={id}
+          agentName={agentName}
           status={stream.status}
           isSleeping={isSleeping}
           onSendComplete={stream.refresh}
@@ -370,6 +398,14 @@ export default function LoungePage({
           </div>
         </div>
       )}
+
+      {/* Settings Drawer */}
+      <SettingsDrawer
+        agentId={id}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onToast={setToast}
+      />
 
       {/* Toast */}
       {toast && (

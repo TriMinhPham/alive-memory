@@ -6,6 +6,10 @@ import { useRouter } from "next/navigation";
 import type { Agent } from "@/lib/types";
 import CreateAgentWizard from "@/components/CreateAgentWizard";
 
+function Skeleton({ className }: { className?: string }) {
+  return <div className={`bg-[#1e1e1a] rounded animate-skeleton ${className ?? ""}`} />;
+}
+
 export default function DashboardPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,8 +44,36 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-[#737373] text-sm">Loading...</p>
+      <div className="min-h-screen">
+        <nav className="border-b border-[#1e1e1a] px-4">
+          <div className="max-w-5xl mx-auto flex items-center justify-between h-14">
+            <span className="text-sm font-light tracking-[0.15em] uppercase text-[#9a8c7a]">
+              ALIVE
+            </span>
+          </div>
+        </nav>
+        <div className="max-w-5xl mx-auto px-4 py-8">
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <Skeleton className="h-6 w-32 mb-2" />
+              <Skeleton className="h-4 w-20" />
+            </div>
+            <Skeleton className="h-10 w-44 rounded-lg" />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="p-5 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
+                <div className="flex items-center gap-3 mb-3">
+                  <Skeleton className="w-2 h-2 rounded-full" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+                <Skeleton className="h-3 w-32 mb-2 ml-5" />
+                <Skeleton className="h-3 w-48 mb-4 ml-5" />
+                <Skeleton className="h-9 w-full rounded-lg" />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -87,7 +119,7 @@ export default function DashboardPage() {
         )}
 
         {agents.length === 0 && !showWizard ? (
-          <div className="text-center py-20">
+          <div className="text-center py-20 border border-dashed border-[#1e1e1a] rounded-xl">
             <p className="text-[#737373] mb-1">No agents yet</p>
             <p className="text-[#525252] text-sm mb-6">
               Bring a digital lifeform into existence.
@@ -354,7 +386,7 @@ function AgentCard({
               className="p-1 text-[#525252] hover:text-[#a3a3a3] transition-colors text-lg leading-none"
               title="Actions"
             >
-              ⋯
+              &#x22EF;
             </button>
             {menuOpen && (
               <div className="absolute right-0 top-8 w-40 bg-[#1a1a1a] border border-[#262620] rounded-lg shadow-xl py-1 z-20">
@@ -449,12 +481,6 @@ function AgentCard({
             className="flex-1 text-center px-3 py-2 bg-[#d4a574] hover:bg-[#c4955a] text-[#0a0a0a] rounded-lg text-xs font-medium transition-colors"
           >
             Lounge
-          </Link>
-          <Link
-            href={`/agent/${agent.id}/configure`}
-            className="px-3 py-2 border border-[#262620] text-[#a3a3a3] hover:text-white hover:border-[#3a3a34] rounded-lg text-xs transition-colors"
-          >
-            Configure
           </Link>
         </div>
       </div>

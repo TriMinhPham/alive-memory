@@ -6,21 +6,20 @@ import type { FeedDrop, FeedStream } from "@/lib/types";
 interface FeedTabProps {
   agentId: string;
   status: "connected" | "reconnecting" | "offline" | "error";
+  onToast?: (msg: string) => void;
 }
 
-export default function FeedTab({ agentId, status }: FeedTabProps) {
+function Skeleton({ className }: { className?: string }) {
+  return <div className={`bg-[#1e1e1a] rounded animate-skeleton ${className ?? ""}`} />;
+}
+
+export default function FeedTab({ agentId, status, onToast }: FeedTabProps) {
   const isOffline = status === "offline" || status === "error";
 
   return (
     <div className="space-y-6">
-      <DropSection agentId={agentId} isOffline={isOffline} />
+      <DropSection agentId={agentId} isOffline={isOffline} onToast={onToast} />
       <StreamSection agentId={agentId} isOffline={isOffline} />
-      {/* Knowledge placeholder */}
-      <div className="p-3 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
-        <span className="text-xs text-[#525252]">
-          Knowledge base — coming soon
-        </span>
-      </div>
     </div>
   );
 }
@@ -30,9 +29,11 @@ export default function FeedTab({ agentId, status }: FeedTabProps) {
 function DropSection({
   agentId,
   isOffline,
+  onToast,
 }: {
   agentId: string;
   isOffline: boolean;
+  onToast?: (msg: string) => void;
 }) {
   const [drops, setDrops] = useState<FeedDrop[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +87,7 @@ function DropSection({
       if (res.ok) {
         setTitle("");
         setContent("");
+        onToast?.("Content dropped into feed");
         await fetchDrops();
       } else {
         setError("Failed to drop content");
@@ -122,7 +124,7 @@ function DropSection({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
-          className="w-full px-3 py-2 bg-[#12121a] border border-[#262620] rounded-lg text-xs focus:outline-none focus:border-[#d4a574] transition-colors disabled:opacity-40"
+          className="w-full px-3 py-2 bg-[#12121a] border border-[#262620] rounded-md text-xs focus:outline-none focus:border-[#d4a574] transition-colors disabled:opacity-40"
           disabled={isOffline}
         />
         <textarea
@@ -130,7 +132,7 @@ function DropSection({
           onChange={(e) => setContent(e.target.value)}
           placeholder="Paste a URL or write text..."
           rows={3}
-          className="w-full px-3 py-2 bg-[#12121a] border border-[#262620] rounded-lg text-xs focus:outline-none focus:border-[#d4a574] transition-colors resize-y disabled:opacity-40"
+          className="w-full px-3 py-2 bg-[#12121a] border border-[#262620] rounded-md text-xs focus:outline-none focus:border-[#d4a574] transition-colors resize-y disabled:opacity-40"
           disabled={isOffline}
         />
         {error && <p className="text-xs text-[#ef4444]">{error}</p>}
@@ -139,14 +141,23 @@ function DropSection({
           disabled={
             sending || !title.trim() || !content.trim() || isOffline
           }
-          className="w-full py-2 bg-[#d4a574] hover:bg-[#c4955a] text-[#0a0a0a] rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+          className="w-full py-2 bg-[#d4a574] hover:bg-[#c4955a] text-[#0a0a0a] rounded-md text-xs font-medium disabled:opacity-50 transition-colors"
         >
           {sending ? "Dropping..." : "Drop into feed"}
         </button>
       </div>
 
       {/* Recent drops */}
-      {!loading && drops.length > 0 && (
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="p-2.5 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
+              <Skeleton className="h-3 w-24 mb-2" />
+              <Skeleton className="h-2.5 w-full" />
+            </div>
+          ))}
+        </div>
+      ) : drops.length > 0 ? (
         <div className="space-y-2">
           <span className="text-xs text-[#525252]">Recent drops</span>
           {drops.map((drop) => (
@@ -168,10 +179,7 @@ function DropSection({
             </div>
           ))}
         </div>
-      )}
-      {loading && (
-        <div className="text-xs text-[#525252]">Loading drops...</div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -333,18 +341,18 @@ function StreamSection({
             value={newUrl}
             onChange={(e) => setNewUrl(e.target.value)}
             placeholder="RSS feed URL"
-            className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded text-xs focus:outline-none focus:border-[#d4a574] transition-colors"
+            className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded-md text-xs focus:outline-none focus:border-[#d4a574] transition-colors"
           />
           <input
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
             placeholder="Label (optional)"
-            className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded text-xs focus:outline-none focus:border-[#d4a574] transition-colors"
+            className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded-md text-xs focus:outline-none focus:border-[#d4a574] transition-colors"
           />
           <button
             onClick={handleAdd}
             disabled={!newUrl.trim() || adding}
-            className="w-full py-2 bg-[#d4a574] hover:bg-[#c4955a] text-[#0a0a0a] rounded text-xs font-medium disabled:opacity-50 transition-colors"
+            className="w-full py-2 bg-[#d4a574] hover:bg-[#c4955a] text-[#0a0a0a] rounded-md text-xs font-medium disabled:opacity-50 transition-colors"
           >
             {adding ? "Adding..." : "Add stream"}
           </button>
@@ -352,7 +360,14 @@ function StreamSection({
       )}
 
       {loading ? (
-        <div className="text-xs text-[#525252]">Loading streams...</div>
+        <div className="space-y-2">
+          {[...Array(2)].map((_, i) => (
+            <div key={i} className="p-2.5 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
+              <Skeleton className="h-3 w-32 mb-1.5" />
+              <Skeleton className="h-2 w-16" />
+            </div>
+          ))}
+        </div>
       ) : streams.length === 0 ? (
         <p className="text-xs text-[#525252] italic">No RSS streams yet</p>
       ) : (
@@ -388,7 +403,7 @@ function StreamSection({
                     disabled={isOffline}
                     className="text-xs text-[#525252] hover:text-[#ef4444] opacity-0 group-hover:opacity-100 transition-all"
                   >
-                    ×
+                    &times;
                   </button>
                 </div>
               </div>
