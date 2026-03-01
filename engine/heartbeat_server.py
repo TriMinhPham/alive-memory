@@ -229,6 +229,11 @@ class ShopkeeperServer:
             await seed()
             print(f"  {Fore.CYAN}[System]{Style.RESET_ALL} Shop initialized. Objects placed on shelves.")
 
+        # TASK-115: Initialize event bus
+        from bus import EventBus
+        self._bus = EventBus()
+        self.heartbeat.set_bus(self._bus)
+
         # Set stage callback for server-side logging
         self.heartbeat.set_stage_callback(self._on_stage)
 

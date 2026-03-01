@@ -165,6 +165,7 @@ class Heartbeat:
         self._loop_restart_count: int = 0
         self._last_loop_error: Optional[str] = None
         self._run_meta = get_run_metadata()
+        self._bus: Optional['EventBus'] = None  # TASK-115: event bus
 
         # TASK-095 v2: Queued sleep for force-sleep when engaged
         self._sleep_queued: bool = False
@@ -252,14 +253,49 @@ class Heartbeat:
             return list(world.gaze_directions)
         return ['at_object', 'away_thinking', 'window', 'down']
 
+    def set_bus(self, bus: 'EventBus') -> None:
+        """Set the event bus for publish-subscribe delivery."""
+        self._bus = bus
+
     def set_stage_callback(self, cb: StageCallback):
         """Set a callback that fires after each pipeline stage."""
         self._stage_callback = cb
 
     async def _emit_stage(self, stage: str, data: dict):
-        """Fire stage callback if set."""
+        """Fire stage callback and bus publish (both independent, fail-open)."""
         if self._stage_callback:
-            await self._stage_callback(stage, data)
+            try:
+                await self._stage_callback(stage, data)
+            except Exception as e:
+                print(f"  [Stage] callback error (non-fatal): {e}")
+        if self._bus is not None:
+            try:
+                from bus_types import TOPIC_STAGE_PROGRESS
+                self._bus.publish(TOPIC_STAGE_PROGRESS, {'stage': stage, 'data': data})
+            except Exception as e:
+                print(f"  [Bus] stage publish error (non-fatal): {e}")
+
+    async def _publish_cycle_log(self, log: dict) -> None:
+        """Publish cycle log to legacy subscribers and bus (fail-open)."""
+        # Legacy path (unchanged semantics)
+        for sub_id, q in list(self._cycle_log_subscribers.items()):
+            while q.full():
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            try:
+                q.put_nowait(log)
+            except asyncio.QueueFull:
+                pass
+        # Bus path (fail-open)
+        if self._bus is not None:
+            try:
+                from bus_types import TOPIC_CYCLE_COMPLETE
+                visitor_id = log.get('visitor_id') or '*'
+                self._bus.publish_keyed(TOPIC_CYCLE_COMPLETE, visitor_id, log)
+            except Exception as e:
+                print(f"  [Bus] cycle_complete publish error (non-fatal): {e}")
 
     def _touch_loop_heartbeat(self):
         """Mark that the main loop is still making progress."""
@@ -1343,16 +1379,7 @@ class Heartbeat:
 
             self._error_backoff = 5
 
-            for sub_id, q in list(self._cycle_log_subscribers.items()):
-                while q.full():
-                    try:
-                        q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                try:
-                    q.put_nowait(habit_log)
-                except asyncio.QueueFull:
-                    pass
+            await self._publish_cycle_log(habit_log)
 
             clear_cycle_context()
             return habit_log
@@ -1430,16 +1457,7 @@ class Heartbeat:
 
             self._error_backoff = 5
 
-            for sub_id, q in list(self._cycle_log_subscribers.items()):
-                while q.full():
-                    try:
-                        q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                try:
-                    q.put_nowait(rest_log)
-                except asyncio.QueueFull:
-                    pass
+            await self._publish_cycle_log(rest_log)
 
             clear_cycle_context()
             return rest_log
@@ -1637,7 +1655,8 @@ class Heartbeat:
         self._error_backoff = 5  # reset backoff on successful cycle
 
         # ── Window broadcast: push scene update to web viewers ──
-        if self._window_broadcast:
+        broadcast_msg = None
+        if self._window_broadcast or self._bus is not None:
             try:
                 from window_state import build_cycle_broadcast
                 room = await db.get_room_state()
@@ -1653,9 +1672,23 @@ class Heartbeat:
                     shelf_items=shelf_items,
                     shop_status=room.shop_status,
                 )
+            except Exception as e:
+                print(f"  [WindowBroadcast] Build error: {e}")
+
+        # Legacy callback (unchanged behavior)
+        if broadcast_msg is not None and self._window_broadcast:
+            try:
                 await self._window_broadcast(broadcast_msg)
             except Exception as e:
                 print(f"  [WindowBroadcast] Error: {e}")
+
+        # Bus path (independent, fail-open)
+        if broadcast_msg is not None and self._bus is not None:
+            try:
+                from bus_types import TOPIC_SCENE_UPDATE
+                self._bus.publish(TOPIC_SCENE_UPDATE, broadcast_msg)
+            except Exception as e:
+                print(f"  [Bus] scene_update publish error (non-fatal): {e}")
         # ── Day Memory: record salient moment from this cycle ──
         try:
             cycle_context = self._build_cycle_context(
@@ -1702,17 +1735,7 @@ class Heartbeat:
             # Drift failure must not break the main cycle
             print(f"  [Drift] Error: {e}")
 
-        # Broadcast to all subscribers (bounded queues, drop oldest if full)
-        for sub_id, q in list(self._cycle_log_subscribers.items()):
-            while q.full():
-                try:
-                    q.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-            try:
-                q.put_nowait(log)
-            except asyncio.QueueFull:
-                pass
+        await self._publish_cycle_log(log)
 
         clear_cycle_context()
         return log
