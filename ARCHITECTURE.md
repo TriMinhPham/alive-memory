@@ -1,4 +1,4 @@
-# ARCHITECTURE — The Shopkeeper
+# ARCHITECTURE — ALIVE Engine
 
 > **Purpose of this file:** This is the code-level architecture map. Every AI agent session (Claude Code, Codex, Cowork) MUST read this before modifying any code. If you're a human contributor, read this first too.
 >
@@ -10,7 +10,9 @@ Last updated: 2026-03-01
 
 ## System Overview
 
-The Shopkeeper is a persistent AI character engine. One LLM call per cognitive cycle. Everything else is deterministic.
+**ALIVE** is a persistent AI character engine — a runtime for autonomous agents with cognitive pipelines, episodic memory, drives, sleep cycles, and identity evolution. One LLM call per cognitive cycle. Everything else is deterministic.
+
+**The Shopkeeper** is the first showcase agent built on ALIVE. She runs as a `demo/` instance with her own identity YAML, visual prompts, and Next.js frontend. The `engine/` directory is the platform — it knows nothing about the Shopkeeper specifically and can host any agent via the Lounge manager dashboard.
 
 ```
 alive/                          ← Repository root
