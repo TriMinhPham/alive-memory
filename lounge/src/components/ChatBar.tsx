@@ -51,15 +51,13 @@ export default function ChatBar({
 
   // Load conversation history on first expand
   const loadHistory = useCallback(async () => {
-    if (!visitorId.current || historyLoaded) return;
+    if (historyLoaded) return;
     try {
+      // visitor_id is derived server-side from managerId — no client ID needed
       const res = await fetch(`/api/agents/${agentId}/history`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          visitor_id: visitorId.current,
-          limit: 100,
-        }),
+        body: JSON.stringify({ limit: 100 }),
       });
       if (res.ok) {
         const data = await res.json();
