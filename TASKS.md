@@ -2084,6 +2084,100 @@ This matters because dynamic actions are the primary signal of agent-initiated g
 
 ---
 
+### TASK-110: Deploy Ergonomics — Preflight Startup Validation
+**Status:** READY
+**Priority:** High
+**Proposal:** `tasks/PROPOSAL-alive-infra-roadmap.md` Phase 1A
+**Description:** Create `engine/preflight.py` (~150 lines) that runs synchronously before `db.init_db()` in `heartbeat_server.py:start()`. Validates:
+- `OPENROUTER_API_KEY` set and non-empty
+- `SHOPKEEPER_SERVER_TOKEN` set
+- If `AGENT_CONFIG_DIR` set: dir exists, `identity.yaml` parses, `alive_config.yaml` parses, `db/` writable
+- Port not already in use (socket probe, 0.5s timeout)
+- Python >= 3.12
+- Required packages importable (aiosqlite, yaml, httpx)
+- DB file not locked by another process
+
+Output: numbered error list with fix instructions, or `[Preflight] OK`. Fail-loud, exit non-zero on any error.
+
+**Implementation steps:**
+1. Create `engine/preflight.py` with a `run_preflight()` function that collects errors into a list
+2. Each check is a small function: `_check_env_vars()`, `_check_config_dir()`, `_check_port()`, `_check_python_version()`, `_check_packages()`, `_check_db_lock()`
+3. `run_preflight()` prints numbered errors + fix suggestions and returns `bool` (pass/fail)
+4. In `engine/heartbeat_server.py` `start()`, call `run_preflight()` before `db.init_db()`. If it returns False, `sys.exit(1)`
+5. Create `tests/test_preflight.py` — test each check in isolation with mocked env/filesystem
+
+**Scope (files you may touch):**
+- `engine/preflight.py` (CREATE)
+- `engine/heartbeat_server.py` (~10 lines: add preflight call in `start()`)
+- `tests/test_preflight.py` (CREATE)
+**Scope (files you may NOT touch):**
+- `engine/db/` (preflight is read-only, never writes to DB)
+- `engine/pipeline/*`
+- `engine/heartbeat.py`
+**Tests:** `python -m pytest tests/test_preflight.py -v` — all pass. `python -m pytest tests/ --tb=short -q` — no regressions.
+**Definition of done:** Starting the server with a missing `OPENROUTER_API_KEY` prints a clear error and exits instead of crashing with a traceback. All checks produce actionable messages.
+
+---
+
+### TASK-111: Deploy Ergonomics — Idempotent create_agent.sh
+**Status:** READY
+**Priority:** High
+**Proposal:** `tasks/PROPOSAL-alive-infra-roadmap.md` Phase 1B
+**Description:** Make `scripts/create_agent.sh` idempotent with two new flags:
+- `--force`: if container exists, stop → update config → restart. Never deletes `db/` or `memory/` directories.
+- `--validate`: run preflight without starting the container.
+
+Only `scripts/create_agent.sh` is modified. `tasks/lounge-deploy/create_agent.sh` is reference/history only and must NOT be touched.
+
+**Implementation steps:**
+1. Add `--force` and `--validate` flag parsing at top of script
+2. `--force`: check if container exists (`docker inspect`), if so: stop it, update config files, restart
+3. `--validate`: run `docker exec <container> python -c "from preflight import run_preflight; ..."` or equivalent (requires TASK-110)
+4. Guard: never `rm -rf` on `db/` or `memory/` directories — only config files are replaceable
+5. Existing behavior (error if container exists) remains the default (no flags)
+
+**Depends on:** TASK-110 (preflight module must exist for `--validate`)
+**Scope (files you may touch):**
+- `scripts/create_agent.sh` (~30 lines added)
+**Scope (files you may NOT touch):**
+- `tasks/lounge-deploy/create_agent.sh` (reference only)
+- `engine/*`
+**Tests:** Manual: `./scripts/create_agent.sh test-agent 9999 sk-test` twice — second run with `--force` should succeed. Without `--force`, second run should fail with clear message.
+**Definition of done:** `create_agent.sh --force` updates config and restarts without data loss. `create_agent.sh --validate` checks config without starting.
+
+---
+
+### TASK-112: Deploy Ergonomics — System Doctor Script
+**Status:** DONE (2026-03-01)
+**Priority:** Medium
+**Proposal:** `tasks/PROPOSAL-alive-infra-roadmap.md` Phase 1C
+**Description:** Create `scripts/doctor.py` (~200 lines) that checks overall system health:
+- All expected env vars present
+- Docker image `alive-engine:latest` exists and its age
+- Ports in use vs expected
+- DB integrity (`PRAGMA integrity_check` on each agent's DB)
+- Disk space on data partition
+- Container status for all registered agents
+- Network connectivity to OpenRouter API
+
+Outputs a human-readable report. No mutations — read-only diagnostic.
+
+**Implementation steps:**
+1. Create `scripts/doctor.py` with a `main()` function
+2. Each check is a function that returns (status, message) tuple: `check_env()`, `check_docker()`, `check_ports()`, `check_dbs()`, `check_disk()`, `check_containers()`, `check_network()`
+3. Print a summary table at the end: `[PASS]` / `[WARN]` / `[FAIL]` per check
+4. Exit 0 if all pass, exit 1 if any fail
+
+**Scope (files you may touch):**
+- `scripts/doctor.py` (CREATE)
+**Scope (files you may NOT touch):**
+- `engine/*`
+- `lounge/*`
+**Tests:** Run `python scripts/doctor.py` locally — should print report without errors (some checks will show WARN for missing Docker, which is expected in dev).
+**Definition of done:** Operator can run `python scripts/doctor.py` on VPS and get a clear health report.
+
+---
+
 ### TASK-XXX: Title
 **Status:** BACKLOG
 **Priority:** Low / Medium / High
