@@ -14,9 +14,14 @@ interface Memory {
 
 interface SeedTabProps {
   agentId: string;
+  onToast?: (msg: string) => void;
 }
 
-export default function SeedTab({ agentId }: SeedTabProps) {
+function Skeleton({ className }: { className?: string }) {
+  return <div className={`bg-[#1e1e1a] rounded animate-skeleton ${className ?? ""}`} />;
+}
+
+export default function SeedTab({ agentId, onToast }: SeedTabProps) {
   const [section, setSection] = useState<"seeds" | "memories">("seeds");
   const [backstory, setBackstory] = useState<Memory[]>([]);
   const [organic, setOrganic] = useState<Memory[]>([]);
@@ -61,6 +66,7 @@ export default function SeedTab({ agentId }: SeedTabProps) {
         setNewTitle("");
         setNewText("");
         setShowAddForm(false);
+        onToast?.("Seed planted");
         await fetchMemories();
       }
     } catch {
@@ -111,7 +117,15 @@ export default function SeedTab({ agentId }: SeedTabProps) {
       </div>
 
       {loading ? (
-        <div className="text-xs text-[#525252]">Loading memories...</div>
+        <div className="space-y-2">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="p-3 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
+              <Skeleton className="h-3 w-20 mb-2" />
+              <Skeleton className="h-2.5 w-full mb-1" />
+              <Skeleton className="h-2.5 w-3/4" />
+            </div>
+          ))}
+        </div>
       ) : section === "seeds" ? (
         <div className="space-y-2">
           {backstory.length === 0 && !showAddForm && (
@@ -136,14 +150,14 @@ export default function SeedTab({ agentId }: SeedTabProps) {
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
                 placeholder="Title (optional)"
-                className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded text-xs focus:outline-none focus:border-[#d4a574] transition-colors"
+                className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded-md text-xs focus:outline-none focus:border-[#d4a574] transition-colors"
               />
               <textarea
                 value={newText}
                 onChange={(e) => setNewText(e.target.value)}
                 placeholder="A moment, a feeling, a place..."
                 rows={3}
-                className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded text-xs focus:outline-none focus:border-[#d4a574] transition-colors resize-y"
+                className="w-full px-3 py-2 bg-[#0a0a0f] border border-[#262620] rounded-md text-xs focus:outline-none focus:border-[#d4a574] transition-colors resize-y"
               />
               <div className="flex gap-2 justify-end">
                 <button
@@ -159,7 +173,7 @@ export default function SeedTab({ agentId }: SeedTabProps) {
                 <button
                   onClick={handleAdd}
                   disabled={!newText.trim() || adding}
-                  className="px-3 py-1.5 bg-[#d4a574] hover:bg-[#c4955a] text-[#0a0a0a] rounded text-xs font-medium disabled:opacity-50 transition-colors"
+                  className="px-3 py-1.5 bg-[#d4a574] hover:bg-[#c4955a] text-[#0a0a0a] rounded-md text-xs font-medium disabled:opacity-50 transition-colors"
                 >
                   {adding ? "Planting..." : "Plant seed"}
                 </button>
