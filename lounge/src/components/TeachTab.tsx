@@ -8,6 +8,10 @@ interface TeachTabProps {
   status: "connected" | "reconnecting" | "offline" | "error";
 }
 
+function Skeleton({ className }: { className?: string }) {
+  return <div className={`bg-[#1e1e1a] rounded animate-skeleton ${className ?? ""}`} />;
+}
+
 export default function TeachTab({ agentId, status }: TeachTabProps) {
   const isOffline = status === "offline" || status === "error";
 
@@ -15,21 +19,16 @@ export default function TeachTab({ agentId, status }: TeachTabProps) {
     <div className="space-y-6">
       <CapabilitySection agentId={agentId} isOffline={isOffline} />
       <ChannelSection agentId={agentId} />
-      {/* MCP placeholder */}
-      <div className="p-3 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
+      {/* MCP placeholder — subtle */}
+      <div className="p-3 border border-[#1e1e1a]/50 rounded-lg">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-xs font-medium text-[#9a8c7a]">MCP Tools</h3>
-            <p className="text-[10px] text-[#525252] mt-0.5">
+            <h3 className="text-xs font-medium text-[#525252]">MCP Tools</h3>
+            <p className="text-[10px] text-[#3a3a3a] mt-0.5">
               Connect external tools
             </p>
           </div>
-          <button
-            disabled
-            className="px-3 py-1.5 bg-[#1e1e1a] text-[#525252] rounded text-[10px] cursor-not-allowed"
-          >
-            Coming soon
-          </button>
+          <span className="text-[10px] text-[#3a3a3a]">Coming soon</span>
         </div>
       </div>
     </div>
@@ -96,7 +95,17 @@ function CapabilitySection({
       </h3>
 
       {loading ? (
-        <div className="text-xs text-[#525252]">Loading capabilities...</div>
+        <div className="space-y-1.5">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="flex items-center justify-between p-2.5 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
+              <div className="flex-1">
+                <Skeleton className="h-3 w-24 mb-1" />
+                <Skeleton className="h-2 w-32" />
+              </div>
+              <Skeleton className="h-5 w-9 rounded-full" />
+            </div>
+          ))}
+        </div>
       ) : capabilities.length === 0 ? (
         <p className="text-xs text-[#525252] italic">
           No capabilities available
@@ -115,7 +124,7 @@ function CapabilitySection({
                   </span>
                   {cap.usage_count !== undefined && cap.usage_count > 0 && (
                     <span className="text-[10px] text-[#525252]">
-                      ×{cap.usage_count}
+                      &times;{cap.usage_count}
                     </span>
                   )}
                 </div>
@@ -128,13 +137,13 @@ function CapabilitySection({
               <button
                 onClick={() => handleToggle(cap.name, cap.enabled)}
                 disabled={isOffline || toggling === cap.name}
-                className={`relative w-8 h-4 rounded-full transition-colors ${
+                className={`relative w-9 h-5 rounded-full transition-colors ${
                   cap.enabled ? "bg-[#d4a574]" : "bg-[#262620]"
                 } disabled:opacity-40`}
               >
                 <span
-                  className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
-                    cap.enabled ? "left-4" : "left-0.5"
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                    cap.enabled ? "left-[18px]" : "left-0.5"
                   }`}
                 />
               </button>
@@ -165,8 +174,6 @@ function ChannelSection({ agentId }: { agentId: string }) {
         const data = await res.json();
         setChannels(data.channels || []);
       }
-      // 404 / 502 — just show empty list; no separate "coming soon" gate
-      // because the channels route synthesizes data when agent is online
     } catch {
       // silent
     } finally {
@@ -185,7 +192,13 @@ function ChannelSection({ agentId }: { agentId: string }) {
       </h3>
 
       {loading ? (
-        <div className="text-xs text-[#525252]">Loading channels...</div>
+        <div className="space-y-1.5">
+          {[...Array(2)].map((_, i) => (
+            <div key={i} className="p-2.5 bg-[#12121a] border border-[#1e1e1a] rounded-lg">
+              <Skeleton className="h-3 w-20" />
+            </div>
+          ))}
+        </div>
       ) : channels.length === 0 ? (
         <p className="text-xs text-[#525252] italic">No channels configured</p>
       ) : (

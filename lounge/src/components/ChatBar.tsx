@@ -5,13 +5,30 @@ import type { ChatMessage } from "@/lib/types";
 
 interface ChatBarProps {
   agentId: string;
+  agentName?: string;
   status: "connected" | "reconnecting" | "offline" | "error";
   isSleeping: boolean;
   onSendComplete?: () => void;
 }
 
+function formatRelativeTime(timestamp: string): string {
+  try {
+    const diff = Date.now() - new Date(timestamp).getTime();
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 1) return "now";
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d`;
+  } catch {
+    return "";
+  }
+}
+
 export default function ChatBar({
   agentId,
+  agentName,
   status,
   isSleeping,
   onSendComplete,
@@ -135,7 +152,6 @@ export default function ChatBar({
 
       if (res.ok) {
         const data = await res.json();
-        // Preserve null response handling from original page.tsx
         if (data.response) {
           const agentMsg: ChatMessage = {
             role: "agent",
@@ -190,7 +206,7 @@ export default function ChatBar({
             className="text-[#525252] hover:text-[#9a8c7a] text-xs transition-colors shrink-0"
             title="Expand chat"
           >
-            ▲
+            &#x25B2;
           </button>
           <input
             value={input}
@@ -226,16 +242,14 @@ export default function ChatBar({
     <div className="relative z-20 border-t border-[#1e1e1a]/50 bg-[#0a0a0f]/95 backdrop-blur-sm flex flex-col max-h-[50vh] animate-slide-up">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-[#1e1e1a]/30">
-        <span className="text-xs text-[#525252]">
-          {messages.length > 0
-            ? `${messages.length} messages`
-            : "No messages yet"}
+        <span className="text-xs text-[#737373]">
+          {agentName || (messages.length > 0 ? `${messages.length} messages` : "Chat")}
         </span>
         <button
           onClick={() => setExpanded(false)}
           className="text-[#525252] hover:text-[#9a8c7a] text-xs transition-colors"
         >
-          ▼ Collapse
+          &#x25BC; Collapse
         </button>
       </div>
 
@@ -253,11 +267,11 @@ export default function ChatBar({
         ))}
         {sending && (
           <div className="flex justify-start">
-            <div className="px-4 py-2.5 rounded-2xl bg-[#1a1510]/70 backdrop-blur-sm">
+            <div className="px-4 py-2.5 rounded-2xl bg-[#1e1a14]/70 backdrop-blur-sm">
               <div className="flex gap-1.5">
                 <div className="w-1.5 h-1.5 bg-[#d4a574]/60 rounded-full animate-bounce" />
-                <div className="w-1.5 h-1.5 bg-[#d4a574]/60 rounded-full animate-bounce [animation-delay:0.15s]" />
-                <div className="w-1.5 h-1.5 bg-[#d4a574]/60 rounded-full animate-bounce [animation-delay:0.3s]" />
+                <div className="w-1.5 h-1.5 bg-[#d4a574]/60 rounded-full animate-bounce [animation-delay:0.1s]" />
+                <div className="w-1.5 h-1.5 bg-[#d4a574]/60 rounded-full animate-bounce [animation-delay:0.2s]" />
               </div>
             </div>
           </div>
@@ -311,16 +325,21 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   }
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
       <div
         className={`max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
           isUser
-            ? "bg-[#1a1a24]/70 backdrop-blur-sm text-[#e5e5e5]"
-            : "bg-[#1a1510]/70 backdrop-blur-sm text-[#e5e5e0]"
+            ? "bg-[#1e1e30]/70 backdrop-blur-sm text-[#e5e5e5]"
+            : "bg-[#1e1a14]/70 backdrop-blur-sm text-[#e5e5e0]"
         }`}
       >
         {message.text}
       </div>
+      {message.timestamp && (
+        <span className="text-[10px] text-[#3a3a3a] mt-1 px-1">
+          {formatRelativeTime(message.timestamp)}
+        </span>
+      )}
     </div>
   );
 }

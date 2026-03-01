@@ -63,10 +63,10 @@ function DriveBar({ label, value, color }: { label: string; value: number; color
   const pct = Math.round(Math.max(0, Math.min(1, value)) * 100);
   return (
     <div className="flex items-center gap-1.5 flex-1 min-w-0">
-      <span className="text-[10px] text-[#525252] w-[54px] shrink-0 text-right">
+      <span className="text-[11px] text-[#5e5e5e] w-[54px] shrink-0 text-right">
         {label}
       </span>
-      <div className="flex-1 h-[3px] rounded-full bg-[#161616] overflow-hidden">
+      <div className="flex-1 h-[4px] rounded-full bg-[#161616] overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-[2s] ease-out"
           style={{ width: `${pct}%`, backgroundColor: color }}
@@ -108,13 +108,13 @@ export default function StateOverlay({
   const energyPct = Math.round(Math.max(0, Math.min(1, energy)) * 100);
 
   return (
-    <div className="px-4 py-2 text-xs select-none space-y-1.5">
+    <div className="px-4 py-2 text-xs select-none space-y-1.5 bg-[#0a0a0f]/60 backdrop-blur-sm">
       {/* Row 1: Mood + Energy + Activity */}
       <div className="flex items-center gap-3">
         <span style={{ color: moodColor }} className="font-medium">
           {moodWord}
         </span>
-        <div className="flex-1 max-w-[120px]">
+        <div className="flex-1 max-w-[140px]">
           <div className="h-1.5 rounded-full bg-[#1a1a1a] overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-1000 ease-out"
