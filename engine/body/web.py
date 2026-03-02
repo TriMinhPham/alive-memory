@@ -57,7 +57,6 @@ async def execute_browse_web(action: ActionRequest, visitor_id: str = None,
             'browse_web',
             success=False,
             error=result.error,
-            **limiter_meta,
         )
         print(f"  [BrowseWeb] Search failed: {e}")
         return result
@@ -113,7 +112,6 @@ async def execute_browse_web(action: ActionRequest, visitor_id: str = None,
     await record_action(
         'browse_web',
         success=True,
-        **limiter_meta,
     )
 
     result.content = result_text

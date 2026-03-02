@@ -120,8 +120,7 @@ async def get_limiter_decision(action_name: str) -> dict:
 
 
 async def record_action(action_name: str, success: bool = True,
-                        channel: str = None, error: str = None,
-                        **_kwargs) -> None:
+                        channel: str = None, error: str = None) -> None:
     """Record that an external action was executed."""
     now = clock.now_utc()
     await _connection._exec_write(
