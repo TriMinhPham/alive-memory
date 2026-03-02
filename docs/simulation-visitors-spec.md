@@ -1,5 +1,10 @@
 # SIMULATED VISITORS — Spec Addendum
 
+> **Note (2026-03):** This is the original design spec. The actual implementation
+> differs — visitor scheduling lives in `engine/simulate.py:load_visitor_schedule()`,
+> not a standalone `visitor_sim.py` class. The top-level `visitor_sim.py` was
+> deleted in TASK-094. Treat code snippets below as historical design intent.
+
 ## For: Claude Code
 ## Goal: Add scripted visitor encounters to the existing simulation mode
 ## Prereq: Simulation mode (clock.py, simulate.py, timeline.py) already implemented

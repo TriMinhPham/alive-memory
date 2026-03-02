@@ -198,8 +198,7 @@ async def execute_tg_send(action: ActionRequest, visitor_id: str = None,
 
     await record_action('tg_send', success=api_result.get('success', False),
                         channel='telegram',
-                        error=api_result.get('error'),
-                        **limiter_meta)
+                        error=api_result.get('error'))
 
     if api_result.get('success'):
         result.payload = {
@@ -253,8 +252,7 @@ async def execute_tg_send_image(action: ActionRequest, visitor_id: str = None,
 
     await record_action('tg_send_image', success=api_result.get('success', False),
                         channel='telegram',
-                        error=api_result.get('error'),
-                        **limiter_meta)
+                        error=api_result.get('error'))
 
     if api_result.get('success'):
         result.payload = {
