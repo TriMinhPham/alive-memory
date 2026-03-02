@@ -60,8 +60,7 @@ async def execute_post_x(action: ActionRequest, visitor_id: str = None,
     api_result = await post_tweet(text)
 
     await record_action('post_x', success=api_result.get('success', False),
-                        channel='x', error=api_result.get('error'),
-                        **limiter_meta)
+                        channel='x', error=api_result.get('error'))
 
     if api_result.get('success'):
         result.payload = {
@@ -118,8 +117,7 @@ async def execute_reply_x(action: ActionRequest, visitor_id: str = None,
     api_result = await reply_tweet(text, reply_to_id)
 
     await record_action('reply_x', success=api_result.get('success', False),
-                        channel='x', error=api_result.get('error'),
-                        **limiter_meta)
+                        channel='x', error=api_result.get('error'))
 
     if api_result.get('success'):
         result.payload = {
@@ -166,8 +164,7 @@ async def execute_post_x_image(action: ActionRequest, visitor_id: str = None,
     api_result = await post_tweet_with_media(text, image_path)
 
     await record_action('post_x_image', success=api_result.get('success', False),
-                        channel='x', error=api_result.get('error'),
-                        **limiter_meta)
+                        channel='x', error=api_result.get('error'))
 
     if api_result.get('success'):
         result.payload = {
