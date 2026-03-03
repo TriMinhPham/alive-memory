@@ -1,0 +1,2 @@
+-- alive-memory initial schema
+-- Applied automatically on first initialize()
