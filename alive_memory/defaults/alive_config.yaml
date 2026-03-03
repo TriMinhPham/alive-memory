@@ -1,0 +1,39 @@
+# alive-memory default cognitive parameters
+# Override by passing config dict or YAML path to AliveMemory()
+
+memory:
+  default_strength: 0.5
+  min_strength: 0.05          # Below this → prune candidate
+  max_memories: 10000
+  embedding_dimensions: 384
+
+intake:
+  base_salience: 0.5
+  conversation_boost: 0.2     # Conversations get salience bump
+  novelty_weight: 0.3
+
+drives:
+  equilibrium_pull: 0.02      # Rate drives return to 0.5
+  diminishing_returns: 0.8    # Multiplier for repeated stimuli
+  social_sensitivity: 0.5     # How much social events affect social drive
+
+consolidation:
+  decay_rate: 0.01            # Strength decay per hour
+  decay_floor: 0.05           # Minimum strength from decay
+  strengthen_boost: 0.1       # Strength gain per rehearsal
+  merge_similarity: 0.85      # Cosine similarity threshold for merging
+  prune_threshold: 0.05       # Strength below this → prune
+  dream_count: 3              # Number of dreams per consolidation
+  reflection_count: 2         # Number of reflections per consolidation
+
+recall:
+  default_limit: 5
+  recency_weight: 0.3
+  strength_weight: 0.3
+  valence_weight: 0.2
+  drive_weight: 0.2
+
+identity:
+  snapshot_interval: 10       # Consolidation cycles between snapshots
+  drift_window: 50            # Cycles to look back for drift detection
+  drift_threshold: 0.15       # Trait change magnitude to flag as drift
