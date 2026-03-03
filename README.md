@@ -1,141 +1,113 @@
-# The Shopkeeper
+# alive-memory
 
-A persistent AI character engine. She runs a shop, keeps a journal, collects objects, and remembers visitors. She is not a chatbot — she has drives, moods, and an internal life that continues even when no one is visiting.
+Cognitive memory layer for persistent AI characters. Handles memory formation, emotional weighting, drive dynamics, recall ranking, consolidation (sleep), identity persistence, and drift detection.
 
-## Prerequisites
+**Status:** Early development (v0.1.0)
 
-- Python 3.12+
-- An [OpenRouter API key](https://openrouter.ai/keys)
-
-## Setup
+## Quick start
 
 ```bash
-# Clone and enter the project
-git clone <repo-url> && cd alive
+# Clone
+git clone git@github.com:TriMinhPham/Alive-sdk.git
+cd Alive-sdk
 
-# Install dependencies
-pip install -r requirements.txt
+# Set up Python environment
+python3 -m venv .venv
+source .venv/bin/activate
 
-# Set your API key
-export OPENROUTER_API_KEY='sk-or-v1-...'
+# Install in dev mode with all extras
+pip install -e ".[all,dev]"
+
+# Run tests
+make test
 ```
 
-## Running
+## Usage
 
-### Option A: Standalone (single terminal)
+```python
+from alive_memory import AliveMemory
 
-```bash
-python terminal.py
-```
+memory = AliveMemory(storage="sqlite:///my_character.db")
+await memory.initialize()
 
-Starts the heartbeat engine in-process and opens a visitor terminal. Good for quick sessions.
+# Record an event
+await memory.intake("conversation", "User said: Hello!")
 
-### Option B: Server + Client (persistent)
+# Recall memories
+results = await memory.recall("greetings", limit=5)
 
-```bash
-# Terminal 1 — start the persistent server
-python heartbeat_server.py
+# Check cognitive state
+state = await memory.state
+print(state.mood.word, state.drives.curiosity)
 
-# Terminal 2 — connect as a visitor
-python terminal.py --connect
-```
-
-The server keeps running between visitor sessions. She continues her internal life (journal writing, mood changes, shop rearrangement) while no one is connected.
-
-## Testing
-
-```bash
-pip install -r requirements.txt  # includes pytest + pytest-asyncio
-python -m pytest tests/ -v
-```
-
-## Manual Death-Spiral Harness
-
-Run sequential failure/recovery stress episodes and fit survival models:
-
-```bash
-python -m experiments.death_spiral_survival --replicates 120 --out-dir experiments/logs/death_spiral
-```
-
-Outputs:
-- `collapse_survival.csv` — time-to-collapse rows
-- `recovery_survival.csv` — time-to-recovery rows (post-collapse)
-- `survival_summary.json` — Cox + AFT-style estimates and group summaries
-- `trajectory_samples.json` — sample turn-by-turn traces for inspection
-
-## Project Structure
-
-```
-heartbeat_server.py     # TCP + HTTP + WebSocket server
-heartbeat.py            # Cognitive cycle engine (perception → routing → LLM → action)
-terminal.py             # CLI visitor interface + debug dashboard
-sleep.py                # End-of-day reflection + memory consolidation
-prompt_assembler.py     # Builds system prompt for cortex
-seed.py                 # Initial data for a fresh database
-
-api/
-  dashboard_routes.py   # Dashboard HTTP endpoint handlers
-
-db/                     # SQLite persistence (package)
-  connection.py         # DB setup, migrations, transactions
-  events.py             # Event store, inbox
-  state.py              # Room, drives, engagement state
-  memory.py             # Visitors, traits, totems, journal, cold search
-  content.py            # Threads, content pool, arbiter
-  analytics.py          # Cycle log, LLM costs, actions, habits
-
-config/
-  identity.py           # Character profile + voice rules
-
-models/
-  event.py              # Event dataclass
-  pipeline.py           # Typed contracts between pipeline stages
-  state.py              # State models (room, drives, visitors, etc.)
-
-pipeline/
-  sensorium.py          # Raw events → perceptions
-  gates.py              # Perception filtering
-  thalamus.py           # Routing decisions (engage / idle / rest)
-  cortex.py             # LLM call (Claude Sonnet)
-  validator.py          # Response format/schema validation
-  basal_ganglia.py      # Multi-intention action selection (Gates 1-6)
-  body.py               # Action execution
-  output.py             # Post-action processing + metacognitive monitor
-  action_registry.py    # Action capabilities, energy costs, cooldowns
-  hypothalamus.py       # Drive math (deterministic)
-  hippocampus.py        # Memory recall
-  hippocampus_write.py  # Memory consolidation
-  affect.py             # Emotional lens
-  arbiter.py            # Attention allocation across channels
-  context_bands.py      # Coarse-grained trigger context for habit matching
-  day_memory.py         # Flashbulb moment recording
-  sanitize.py           # Input sanitization
-  enrich.py             # URL metadata fetching
-  ack.py                # Instant acknowledgments
-
-tests/                  # pytest test suite (420+ tests)
+# Consolidate (sleep)
+report = await memory.consolidate()
 ```
 
 ## Architecture
 
-Single LLM call per cognitive cycle (`pipeline/cortex.py`). Everything else is deterministic — drives math, routing, validation, memory retrieval. The shopkeeper runs on an async heartbeat loop that processes events from an inbox queue.
-
 ```
-Events → Inbox → Sensorium → Gates → Affect → Hypothalamus → Thalamus
-                                                                  │
-                                           Hippocampus (recall) ←─┘
-                                                  │
-                                               Cortex (LLM)
-                                                  │
-                                              Validator
-                                                  │
-                                           Basal Ganglia (select)
-                                                  │
-                                               Body (execute)
-                                                  │
-                                               Output → Hippocampus Write
+alive_memory/
+├── types.py              # Core type system (Memory, Perception, DriveState, etc.)
+├── config.py             # YAML/dict config loader
+├── intake/               # Raw events → perceptions → memories
+│   ├── thalamus.py       #   Event → Perception (salience scoring)
+│   ├── affect.py         #   Emotional valence computation
+│   ├── formation.py      #   Perception → Memory formation
+│   └── drives.py         #   Drive state updates
+├── recall/               # Memory retrieval
+│   ├── hippocampus.py    #   Vector search + re-ranking
+│   ├── weighting.py      #   Scoring math (strength, valence, decay)
+│   └── context.py        #   Mood-congruent, drive-coupled recall
+├── consolidation/        # Sleep cycle
+│   ├── strengthening.py  #   Rehearsal → strengthen
+│   ├── decay.py          #   Time-based decay
+│   ├── pruning.py        #   Remove weak memories
+│   ├── merging.py        #   Combine similar memories
+│   ├── dreaming.py       #   LLM-powered dream generation
+│   ├── reflection.py     #   LLM-powered self-reflection
+│   └── whisper.py        #   Config changes → dream perceptions
+├── identity/             # Persistent self-model
+│   ├── self_model.py     #   Self-representation
+│   ├── drift.py          #   Behavioral drift detection
+│   ├── evolution.py      #   Identity change resolution
+│   └── history.py        #   Developmental snapshots
+├── meta/                 # Self-tuning
+│   ├── controller.py     #   Parameter adjustments
+│   └── evaluation.py     #   Closed-loop eval
+├── storage/              # Persistence backends
+│   ├── base.py           #   BaseStorage ABC
+│   └── sqlite.py         #   SQLite + sqlite-vec
+├── embeddings/           # Vector embedding providers
+│   ├── local.py          #   Local model
+│   └── api.py            #   API-based (OpenAI, etc.)
+└── llm/                  # LLM providers (for dreaming/reflection)
+    ├── provider.py       #   LLMProvider protocol
+    ├── anthropic.py      #   Claude
+    └── openrouter.py     #   OpenRouter
 ```
 
-## Data
+## Key concepts
 
-Runtime data lives in `data/shopkeeper.db` (SQLite, auto-created on first run). The database is gitignored — each instance starts fresh and develops its own history.
+- **Intake**: Raw events are converted to structured perceptions, scored for salience, tagged with emotional valence, and formed into memories with drive-coupling metadata.
+- **Recall**: Vector similarity search re-ranked by consolidation strength, mood congruence, drive coupling, and recency.
+- **Consolidation**: Periodic "sleep" that strengthens important memories, decays weak ones, prunes noise, merges duplicates, and (with an LLM) generates dreams and self-reflections.
+- **Identity**: A persistent self-model that evolves over time with drift detection and three-tier change resolution (accept/correct/defer).
+- **Meta**: Self-tuning parameters that adjust cognitive behavior based on closed-loop evaluation.
+
+## Development
+
+```bash
+make test          # Run tests
+make lint          # Lint with ruff
+make typecheck     # Type check with mypy
+make coverage      # Run tests with coverage
+make format        # Auto-format code
+make check         # Run all checks (lint + typecheck + test)
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow.
+
+## License
+
+MIT
