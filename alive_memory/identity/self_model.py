@@ -123,14 +123,15 @@ class SelfModelManager:
 
         for name, value in trait_updates.items():
             old = model.traits.get(name)
-            model.traits[name] = max(lo, min(hi, value))
+            clamped = max(lo, min(hi, value))
+            model.traits[name] = clamped
 
-            if old is not None and abs(value - old) > 0.01:
+            if old is not None and abs(clamped - old) > 0.01:
                 model.drift_history.append({
                     "trait": name,
                     "old": old,
-                    "new": value,
-                    "delta": value - old,
+                    "new": clamped,
+                    "delta": clamped - old,
                     "at": datetime.now(timezone.utc).isoformat(),
                 })
 
@@ -225,15 +226,16 @@ async def update_traits(
 
     for name, value in trait_updates.items():
         old = model.traits.get(name)
-        model.traits[name] = max(-1.0, min(1.0, value))
+        clamped = max(-1.0, min(1.0, value))
+        model.traits[name] = clamped
 
         # Track drift
-        if old is not None and abs(value - old) > 0.01:
+        if old is not None and abs(clamped - old) > 0.01:
             model.drift_history.append({
                 "trait": name,
                 "old": old,
-                "new": value,
-                "delta": value - old,
+                "new": clamped,
+                "delta": clamped - old,
                 "at": datetime.now(timezone.utc).isoformat(),
             })
 
