@@ -219,7 +219,7 @@ class LoCoMoDataset(DatasetAdapter):
         """Evaluate using token F1 (LoCoMo's primary metric).
 
         Category 5 (adversarial) uses abstention scoring.
-        Category 1 (multi_hop) splits answers on ';' for partial scoring.
+        Category 1 (multi_hop) splits answers on ',' for partial scoring.
         """
         results: list[EvalResult] = []
 
@@ -237,9 +237,11 @@ class LoCoMoDataset(DatasetAdapter):
                 }
             elif gt.category == "multi_hop":
                 # Multi-hop: check containment of each sub-answer, then
-                # compute overall F1 against the full answer string
-                sub_answers = [a.strip() for a in gt.answer.split(";") if a.strip()]
-                if not sub_answers:
+                # compute overall F1 against the full answer string.
+                # Real LoCoMo answers use commas as separators
+                # (e.g., "pottery, camping, painting, swimming")
+                sub_answers = [a.strip() for a in gt.answer.split(",") if a.strip()]
+                if len(sub_answers) <= 1:
                     sub_answers = [gt.answer]
                 # Check how many sub-answers are present in prediction
                 hits = sum(1 for sa in sub_answers if substring_match(pred, [sa]) > 0)
