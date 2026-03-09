@@ -153,12 +153,20 @@ class AliveMemorySystem(MemorySystemAdapter):
 
     async def get_metrics(self) -> SystemMetrics:
         storage = 0
+        # SQLite database (Tier 1 + Tier 3)
         if self._db_path and os.path.exists(self._db_path):
             storage = os.path.getsize(self._db_path)
             for suffix in ("-wal", "-shm"):
                 wal = self._db_path + suffix
                 if os.path.exists(wal):
                     storage += os.path.getsize(wal)
+        # Hot memory markdown files (Tier 2: journal, visitors, threads, etc.)
+        if self._tmp_dir:
+            memory_dir = os.path.join(self._tmp_dir, "memory")
+            if os.path.isdir(memory_dir):
+                for dirpath, _dirnames, filenames in os.walk(memory_dir):
+                    for f in filenames:
+                        storage += os.path.getsize(os.path.join(dirpath, f))
 
         return SystemMetrics(
             total_llm_calls=self._tracker.total_calls + self._llm_calls,

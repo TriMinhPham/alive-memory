@@ -76,15 +76,19 @@ class AcademicBenchmarkRunner:
             if (i + 1) % self.consolidation_interval == 0:
                 await self.system.consolidate()
 
-            # Answer queries scoped to this session
+            # Answer queries scoped to this session, then reset state
+            # to prevent cross-session information leakage
             session_id = session[0].session_id if session else ""
             if session_id and session_id in queries_by_session:
+                await self.system.consolidate()
                 for query in queries_by_session[session_id]:
                     t0 = time.perf_counter()
                     answer = await self.system.answer_query(query, self.llm_config)
                     elapsed_ms = (time.perf_counter() - t0) * 1000
                     query_latencies.append(elapsed_ms)
                     predictions[query.query_id] = answer
+                # Reset memory state between independent sessions
+                await self.system.reset()
 
             if (i + 1) % 10 == 0:
                 print(f"  [{self.system.system_id}] Ingested {i + 1}/{len(sessions)} sessions ({total_turns} turns)")

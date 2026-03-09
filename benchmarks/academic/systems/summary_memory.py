@@ -36,6 +36,7 @@ class SummaryMemorySystem(MemorySystemAdapter):
         self._tracker = LLMTracker()
         self._pending_turns = []
         self._summarize_every = config.get("summarize_every", 20)
+        self._llm_config = config  # preserve for summarization calls
 
     async def add_conversation(self, turns: list[ConversationTurn]) -> None:
         for turn in turns:
@@ -64,7 +65,7 @@ class SummaryMemorySystem(MemorySystemAdapter):
         answer = await llm_answer(
             question=prompt,
             context="",
-            llm_config={},  # uses env vars
+            llm_config=self._llm_config,
             tracker=self._tracker,
         )
 
