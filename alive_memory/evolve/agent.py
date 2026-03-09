@@ -336,14 +336,19 @@ def revert_changes(backups: dict[str, str], repo_root: str) -> None:
 
 
 def reload_memory_modules(target_files: list[str]) -> None:
-    """Reload modified modules so the next eval uses the new code.
+    """Reload modified modules **and their importers** so the next eval uses new code.
 
     Converts file paths to module names and calls :func:`importlib.reload`
-    on modules already present in :data:`sys.modules`.
+    on modules already present in :data:`sys.modules`.  After reloading the
+    changed modules, any ``alive_memory.*`` module that imports from them is
+    also reloaded so that stale name bindings are refreshed.
 
     Args:
         target_files: Relative file paths that were modified.
     """
+    reloaded: set[str] = set()
+
+    # 1. Reload the directly modified modules
     for rel_path in target_files:
         if not rel_path.endswith(".py"):
             continue
@@ -354,6 +359,41 @@ def reload_memory_modules(target_files: list[str]) -> None:
         if module_name in sys.modules:
             try:
                 importlib.reload(sys.modules[module_name])
+                reloaded.add(module_name)
                 logger.debug("Reloaded module %s", module_name)
             except Exception:
                 logger.warning("Failed to reload module %s", module_name, exc_info=True)
+
+    if not reloaded:
+        return
+
+    # 2. Reload alive_memory.* modules that import from the changed modules.
+    #    This ensures that parent packages and sibling importers pick up the
+    #    new function objects instead of keeping stale references.
+    for mod_name, mod in list(sys.modules.items()):
+        if mod is None or not mod_name.startswith("alive_memory."):
+            continue
+        if mod_name in reloaded:
+            continue
+        # Check if this module directly references any reloaded module
+        try:
+            source = getattr(mod, "__file__", None)
+            if source is None:
+                continue
+            # Quick heuristic: check if the module's dict holds objects from
+            # any reloaded module by inspecting import relationships.
+            for reloaded_name in reloaded:
+                # A module that imported from the reloaded one will have the
+                # reloaded module's name as a substring of its imports.
+                parts = reloaded_name.rsplit(".", 1)
+                short_name = parts[-1] if len(parts) > 1 else reloaded_name
+                if short_name in dir(mod) or reloaded_name in str(
+                    getattr(mod, "__spec__", "")
+                ):
+                    importlib.reload(mod)
+                    logger.debug(
+                        "Cascade-reloaded %s (imports from %s)", mod_name, reloaded_name
+                    )
+                    break
+        except Exception:
+            logger.debug("Skipped cascade reload for %s", mod_name, exc_info=True)

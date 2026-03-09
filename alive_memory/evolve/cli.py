@@ -25,7 +25,8 @@ async def _run(args: argparse.Namespace) -> None:
         verbose=not args.quiet,
     )
 
-    result = await evolve(config=evolve_config)
+    llm = _create_llm(args.llm)
+    result = await evolve(evolve_config=evolve_config, llm_fn=llm)
 
     # Write result JSON
     with open(args.output, "w") as f:

@@ -92,10 +92,12 @@ def cluster_failures(
     pick the case with the worst score as the representative example.
     Sort clusters by count descending.
     """
-    # Partition failures by category
+    from alive_memory.evolve.scorer import score_case
+
+    # Partition failures by category using category-adjusted scores
     by_category: dict[str, list[CaseResult]] = {}
     for cr in results:
-        if cr.score.composite >= threshold:
+        if score_case(cr) >= threshold:
             by_category.setdefault(cr.category, []).append(cr)
 
     clusters: list[FailureCluster] = []
@@ -163,10 +165,12 @@ def generate_failure_report(
     pass_count = train_result.pass_count
     fail_count = train_result.fail_count
 
-    # If pass/fail counts haven't been pre-computed, derive from scores
+    # If pass/fail counts haven't been pre-computed, derive from adjusted scores
     if pass_count + fail_count == 0:
+        from alive_memory.evolve.scorer import score_case
+
         fail_count = sum(
-            1 for cr in train_result.case_results if cr.score.composite >= 0.5
+            1 for cr in train_result.case_results if score_case(cr) >= 0.5
         )
         pass_count = total - fail_count
 
