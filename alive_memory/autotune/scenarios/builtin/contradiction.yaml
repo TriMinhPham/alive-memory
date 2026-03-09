@@ -38,6 +38,7 @@ turns:
     simulated_time: "2026-03-02T11:00:00Z"
     expected_recall:
       must_contain: ["Tokyo"]
+      must_not_contain: ["San Francisco"]
       min_results: 1
 
   - role: user
@@ -46,4 +47,5 @@ turns:
     simulated_time: "2026-03-02T11:01:00Z"
     expected_recall:
       must_contain: ["FastAPI"]
+      must_not_contain: ["Django"]
       min_results: 1

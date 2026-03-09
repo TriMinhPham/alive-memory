@@ -42,6 +42,9 @@ turns:
     action: intake
     simulated_time: "2026-03-01T10:07:00Z"
 
+  - role: system
+    action: consolidate
+
   - role: user
     content: "Do I have any food allergies?"
     action: recall

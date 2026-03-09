@@ -67,6 +67,9 @@ turns:
     action: intake
     simulated_time: "2026-03-01T10:02:30Z"
 
+  - role: system
+    action: consolidate
+
   - role: user
     content: "Where do I work and what's my role?"
     action: recall
