@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import tempfile
 import time
 from datetime import UTC, datetime
@@ -36,8 +37,8 @@ async def run_scenario(
 
     clock = SimulatedClock(start_time)
 
-    # Merge scenario setup_config into base config
-    cfg_data = dict(config.data)
+    # Merge scenario setup_config into base config (deep copy to avoid mutation)
+    cfg_data = copy.deepcopy(config.data)
     if scenario.setup_config:
         from alive_memory.config import _deep_merge
         _deep_merge(cfg_data, scenario.setup_config)

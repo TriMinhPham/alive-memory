@@ -91,8 +91,9 @@ async def form_moment(
         return None
 
     # Dedup guard: reject near-duplicate content within window
+    ref_time = _clock.now().isoformat()
     recent_contents = await storage.get_recent_moment_content(
-        window_minutes=dedup_window
+        window_minutes=dedup_window, reference_time=ref_time
     )
     if _is_duplicate(perception.content, recent_contents, threshold=dedup_similarity):
         return None

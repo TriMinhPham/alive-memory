@@ -54,7 +54,9 @@ async def autotune(
 
     # Run baseline
     baseline_scores = await _evaluate_config(base_config, scenarios)
-    baseline_composite = aggregate_scores(baseline_scores)
+    baseline_composite = aggregate_scores(
+        baseline_scores, scoring_weights=at_cfg.scoring_weights
+    )
 
     best_config = base_config
     best_composite = baseline_composite
@@ -75,7 +77,7 @@ async def autotune(
 
         # Evaluate candidate
         scores = await _evaluate_config(candidate_config, scenarios)
-        composite = aggregate_scores(scores)
+        composite = aggregate_scores(scores, scoring_weights=at_cfg.scoring_weights)
 
         is_best = composite < best_composite
         if is_best:
@@ -131,5 +133,5 @@ async def _evaluate_config(
     scores: dict[str, MemoryScore] = {}
     for scenario in scenarios:
         result = await run_scenario(scenario, config)
-        scores[scenario.name] = score_simulation(result)
+        scores[scenario.name] = score_simulation(result, category=scenario.category)
     return scores
