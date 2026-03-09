@@ -72,12 +72,14 @@ def score_simulation(result: SimulationResult, *, category: str = "") -> MemoryS
     decay_accuracy = 0.0
 
     if category == "dedup":
-        # Good dedup = recall still finds the key facts (not over-filtered)
-        # AND some duplicates were rejected. Use recall completeness as primary
-        # signal and add a small bonus for rejecting some duplicates.
+        # Good dedup balances duplicate rejection with preserving unique facts.
+        # Ideal: reject duplicates but keep unique inputs.
+        # Score = recall_completeness * dedup_balance, where dedup_balance
+        # peaks around 40-60% rejection and drops toward both extremes.
         rejection_rate = result.moments_rejected / total_intake if total_intake > 0 else 0.0
-        # Penalize both extremes: 0 rejections (no dedup) and near-total rejection (over-filtering)
-        dedup_accuracy = recall_completeness * min(rejection_rate * 2.0, 1.0)
+        # Bell-curve-like: peaks at 0.5 rejection, drops to 0 at extremes
+        dedup_balance = 1.0 - (2.0 * rejection_rate - 1.0) ** 2
+        dedup_accuracy = recall_completeness * max(0.0, dedup_balance)
 
     if category == "forgetting":
         # Forgetting quality is measured by recall — important info found, chitchat not.
