@@ -27,6 +27,10 @@ turns:
     action: intake
     simulated_time: "2026-03-01T10:04:00Z"
 
+  # Consolidate to write moments to hot memory (required for recall)
+  - role: system
+    action: consolidate
+
   - role: user
     content: "What programming language do I prefer?"
     action: recall
