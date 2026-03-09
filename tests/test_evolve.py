@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from alive_memory.evolve.types import (
-    CaseResult,
-    ConversationTurn,
-    EvalCase,
-    EvalQuery,
-    EvolveScore,
-    FailureCategory,
-    RecallScore,
-    SplitResult,
-    TimeGap,
+from alive_memory.evolve.agent import (
+    validate_changes,
 )
+from alive_memory.evolve.analyzer import (
+    cluster_failures,
+    generate_failure_report,
+)
+from alive_memory.evolve.engine import should_promote
 from alive_memory.evolve.scorer import (
     aggregate_split,
     cosine_similarity,
@@ -24,21 +21,21 @@ from alive_memory.evolve.scorer import (
     match_fact,
     score_query,
 )
+from alive_memory.evolve.suite.loader import load_seed_suite
 from alive_memory.evolve.suite.validator import (
     fact_traceable_to_conversation,
     validate_case,
 )
-from alive_memory.evolve.suite.loader import load_seed_suite
-from alive_memory.evolve.analyzer import (
-    cluster_failures,
-    generate_failure_report,
+from alive_memory.evolve.types import (
+    CaseResult,
+    ConversationTurn,
+    EvalCase,
+    EvalQuery,
+    EvolveScore,
+    FailureCategory,
+    RecallScore,
+    SplitResult,
 )
-from alive_memory.evolve.agent import (
-    FORBIDDEN_IMPORTS,
-    validate_changes,
-)
-from alive_memory.evolve.engine import should_promote
-
 
 # ── Helpers ───────────────────────────────────────────────────────
 
