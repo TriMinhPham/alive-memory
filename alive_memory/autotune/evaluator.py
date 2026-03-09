@@ -30,8 +30,13 @@ def score_recall(result: RecallResult) -> tuple[float, float]:
     return precision, completeness
 
 
-def score_simulation(result: SimulationResult) -> MemoryScore:
-    """Score a full simulation result."""
+def score_simulation(result: SimulationResult, *, category: str = "") -> MemoryScore:
+    """Score a full simulation result.
+
+    Args:
+        result: The simulation result to score.
+        category: Scenario category for category-specific scoring.
+    """
     # Recall metrics
     precisions = []
     completions = []
@@ -58,31 +63,60 @@ def score_simulation(result: SimulationResult) -> MemoryScore:
     else:
         median_latency = 0.0
 
+    # Category-specific scoring
+    dedup_accuracy = 0.0
+    decay_accuracy = 0.0
+
+    if category == "dedup":
+        # Good dedup = high rejection rate for near-duplicate content
+        dedup_accuracy = result.moments_rejected / total_intake if total_intake > 0 else 0.0
+
+    if category == "forgetting":
+        # Forgetting quality is measured by recall — important info found, chitchat not.
+        # Use recall completeness as a proxy for decay accuracy.
+        decay_accuracy = recall_completeness
+
     return MemoryScore(
         recall_precision=recall_precision,
         recall_completeness=recall_completeness,
         intake_acceptance_rate=acceptance,
-        dedup_accuracy=0.0,  # Scored separately per scenario category
-        decay_accuracy=0.0,
+        dedup_accuracy=dedup_accuracy,
+        decay_accuracy=decay_accuracy,
         recall_latency_ms=median_latency,
     )
 
 
-def score_dedup_scenario(result: SimulationResult) -> float:
-    """Score dedup accuracy: fewer duplicate moments = better dedup."""
-    total = result.moments_recorded + result.moments_rejected
-    if total == 0:
-        return 0.0
-    # Good dedup = high rejection rate for duplicate content
-    return result.moments_rejected / total
+def _weighted_composite(score: MemoryScore, weights: dict | None) -> float:
+    """Compute composite with custom weights. Lower = better."""
+    if weights is None:
+        return score.composite
+
+    w = {
+        "recall_completeness": weights.get("recall_completeness", 0.35),
+        "recall_precision": weights.get("recall_precision", 0.30),
+        "dedup_accuracy": weights.get("dedup_accuracy", 0.15),
+        "decay_accuracy": weights.get("decay_accuracy", 0.10),
+        "intake_acceptance_rate": weights.get("intake_acceptance_rate", 0.10),
+    }
+    quality = (
+        w["recall_completeness"] * score.recall_completeness
+        + w["recall_precision"] * score.recall_precision
+        + w["dedup_accuracy"] * score.dedup_accuracy
+        + w["decay_accuracy"] * score.decay_accuracy
+        + w["intake_acceptance_rate"] * score.intake_acceptance_rate
+    )
+    latency_penalty = min(score.recall_latency_ms / 1000.0, 1.0) * 0.05
+    return 1.0 - quality + latency_penalty
 
 
 def aggregate_scores(
     scores: dict[str, MemoryScore],
+    *,
+    scoring_weights: dict | None = None,
 ) -> float:
     """Aggregate per-scenario scores into a single composite. Lower = better."""
     if not scores:
         return 1.0
 
-    composites = [s.composite for s in scores.values()]
+    composites = [_weighted_composite(s, scoring_weights) for s in scores.values()]
     return sum(composites) / len(composites)
