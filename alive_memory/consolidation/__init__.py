@@ -145,17 +145,19 @@ async def consolidate(
         await storage.mark_moment_processed(moment.id, nap=is_nap)
         report.moments_processed += 1
 
-    # Upsert visitors (deduplicated — once per visitor, not per moment)
-    seen_visitors: set[str] = set()
-    for moment in moments:
-        visitor_name = moment.metadata.get("visitor_name")
-        visitor_id = moment.metadata.get("visitor_id") or visitor_name
-        if visitor_id and visitor_name and visitor_id not in seen_visitors:
-            seen_visitors.add(visitor_id)
-            try:
-                await storage.upsert_visitor(visitor_id, visitor_name)
-            except Exception:
-                logger.debug("Failed to upsert visitor %s", visitor_id, exc_info=True)
+    # Upsert visitors (full only — nap moments are re-processed during full sleep,
+    # so upserting during nap would double-count the visit)
+    if not is_nap:
+        seen_visitors: set[str] = set()
+        for moment in moments:
+            visitor_name = moment.metadata.get("visitor_name")
+            visitor_id = moment.metadata.get("visitor_id") or visitor_name
+            if visitor_id and visitor_name and visitor_id not in seen_visitors:
+                seen_visitors.add(visitor_id)
+                try:
+                    await storage.upsert_visitor(visitor_id, visitor_name)
+                except Exception:
+                    logger.debug("Failed to upsert visitor %s", visitor_id, exc_info=True)
 
     # Step 3 (full only): Daily summary + batch embed + flush
     if not is_nap:
