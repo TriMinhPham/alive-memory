@@ -381,15 +381,19 @@ class AliveMemory:
         query: str,
         *,
         limit: int = 10,
+        visitor_id: str | None = None,
     ) -> RecallContext:
-        """Retrieve context relevant to a query from hot memory.
+        """Retrieve context relevant to a query from memory.
 
-        Uses markdown-first grep over hot memory files.
-        Cold embeddings are NOT searched here (only during sleep).
+        When visitor_id is provided (or detected from the query), does
+        direct ID-based lookups for visitor profile, totems, and traits.
+        Falls back to keyword grep + search for open-ended queries.
 
         Args:
-            query: Search query text (keywords).
+            query: Search query text.
             limit: Maximum results per category.
+            visitor_id: Known visitor ID for direct lookups (optional).
+                If not provided, attempts to identify visitor from query.
 
         Returns:
             RecallContext with categorized results.
@@ -402,6 +406,7 @@ class AliveMemory:
             limit=limit,
             config=self._config,
             storage=self._storage,
+            visitor_id=visitor_id,
         )
 
     # ── Consolidation ────────────────────────────────────────────
