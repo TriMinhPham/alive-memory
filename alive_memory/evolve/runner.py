@@ -114,13 +114,15 @@ async def run_case(
                 context = await mem.recall(query.query)
                 recall_ms = (time.monotonic() - recall_start) * 1000
 
-                # Flatten recalled text — same approach as autotune simulator
+                # Flatten recalled text — include semantic memory fields
                 recalled_items: list[str] = (
                     context.journal_entries
                     + context.visitor_notes
                     + context.self_knowledge
                     + context.reflections
                     + context.thread_context
+                    + getattr(context, "totem_facts", [])
+                    + getattr(context, "trait_facts", [])
                 )
 
                 # Score this query

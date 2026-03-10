@@ -133,23 +133,28 @@ async def consolidate(
         if llm:
             try:
                 visitor_name = moment.metadata.get("visitor_name")
-                fact_counts = await extract_facts(
+                await extract_facts(
                     moment, storage=storage, llm=llm,
                     visitor_name=visitor_name,
                 )
-                # Also update visitor record if we have visitor info
-                visitor_id = moment.metadata.get("visitor_id") or visitor_name
-                if visitor_id and visitor_name:
-                    try:
-                        await storage.upsert_visitor(visitor_id, visitor_name)
-                    except Exception:
-                        logger.debug("Failed to upsert visitor %s", visitor_id, exc_info=True)
             except Exception:
                 logger.debug("Fact extraction failed for moment %s", moment.id, exc_info=True)
 
         # Mark processed
         await storage.mark_moment_processed(moment.id, nap=is_nap)
         report.moments_processed += 1
+
+    # Upsert visitors (deduplicated — once per visitor, not per moment)
+    seen_visitors: set[str] = set()
+    for moment in moments:
+        visitor_name = moment.metadata.get("visitor_name")
+        visitor_id = moment.metadata.get("visitor_id") or visitor_name
+        if visitor_id and visitor_name and visitor_id not in seen_visitors:
+            seen_visitors.add(visitor_id)
+            try:
+                await storage.upsert_visitor(visitor_id, visitor_name)
+            except Exception:
+                logger.debug("Failed to upsert visitor %s", visitor_id, exc_info=True)
 
     # Step 3 (full only): Daily summary + batch embed + flush
     if not is_nap:
