@@ -22,6 +22,7 @@ from alive_memory.config import AliveConfig
 logger = logging.getLogger(__name__)
 from alive_memory.consolidation.cold_search import find_cold_echoes
 from alive_memory.consolidation.dreaming import dream
+from alive_memory.consolidation.fact_extraction import extract_facts
 from alive_memory.consolidation.memory_updates import apply_reflection_to_hot_memory
 from alive_memory.consolidation.reflection import reflect_daily_summary, reflect_on_moment
 from alive_memory.embeddings.base import EmbeddingProvider
@@ -127,6 +128,24 @@ async def consolidate(
                 moment_id=moment.id,
             )
             report.journal_entries_written += 1
+
+        # Extract structured facts (totems + traits) from the moment
+        if llm:
+            try:
+                visitor_name = moment.metadata.get("visitor_name")
+                fact_counts = await extract_facts(
+                    moment, storage=storage, llm=llm,
+                    visitor_name=visitor_name,
+                )
+                # Also update visitor record if we have visitor info
+                visitor_id = moment.metadata.get("visitor_id") or visitor_name
+                if visitor_id and visitor_name:
+                    try:
+                        await storage.upsert_visitor(visitor_id, visitor_name)
+                    except Exception:
+                        logger.debug("Failed to upsert visitor %s", visitor_id, exc_info=True)
+            except Exception:
+                logger.debug("Fact extraction failed for moment %s", moment.id, exc_info=True)
 
         # Mark processed
         await storage.mark_moment_processed(moment.id, nap=is_nap)
