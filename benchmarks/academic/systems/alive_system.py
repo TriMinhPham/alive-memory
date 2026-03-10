@@ -55,6 +55,11 @@ class AliveMemorySystem(MemorySystemAdapter):
 
         sdk_config = config.get("alive_config", {})
 
+        # Benchmark defaults: let everything through for maximum recall
+        sdk_config.setdefault("intake.salience_threshold", 0.0)
+        sdk_config.setdefault("intake.max_salience_threshold", 0.0)
+        sdk_config.setdefault("intake.max_day_moments", 999999)
+
         # Wire up LLM provider for consolidation
         llm = None
         self._llm_calls = 0
@@ -107,7 +112,13 @@ class AliveMemorySystem(MemorySystemAdapter):
 
         for turn in turns:
             event_type = _ROLE_TO_EVENT.get(turn.role, EventType.CONVERSATION)
-            metadata = {"session_id": turn.session_id, "turn_id": turn.turn_id}
+            # Extract speaker name from metadata or content
+            speaker = (turn.metadata or {}).get("speaker", "")
+            metadata = {
+                "session_id": turn.session_id,
+                "turn_id": turn.turn_id,
+                "visitor_name": speaker,
+            }
             if turn.timestamp:
                 metadata["timestamp"] = turn.timestamp
 
@@ -120,7 +131,7 @@ class AliveMemorySystem(MemorySystemAdapter):
 
     async def consolidate(self) -> None:
         if self._memory:
-            await self._memory.consolidate(depth="nap")
+            await self._memory.consolidate(depth="full")
 
     async def answer_query(self, query: MemoryQuery, llm_config: dict) -> str:
         if not self._memory:
@@ -140,6 +151,10 @@ class AliveMemorySystem(MemorySystemAdapter):
             context_parts.append("Self-knowledge:\n" + "\n".join(ctx.self_knowledge[:3]))
         if hasattr(ctx, "reflections") and ctx.reflections:
             context_parts.append("Reflections:\n" + "\n".join(ctx.reflections[:3]))
+        if ctx.totem_facts:
+            context_parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
+        if ctx.trait_facts:
+            context_parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
         if hasattr(ctx, "cold_echoes") and ctx.cold_echoes:
             context_parts.append("Historical echoes:\n" + "\n".join(ctx.cold_echoes[:3]))
 
