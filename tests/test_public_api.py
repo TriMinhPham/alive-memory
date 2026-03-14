@@ -120,27 +120,23 @@ class TestCallableLLM:
 
 
 class TestSyncWrappers:
-    def test_intake_sync(self):
+    def test_intake_sync_auto_init(self):
+        """Sync wrappers auto-initialize storage on first call."""
         mem = AliveMemory(storage=":memory:")
-        import asyncio
-        asyncio.run(mem.initialize())
         result = mem.intake_sync("conversation", "hello world")
-        # May or may not create a moment depending on salience
         assert result is None or hasattr(result, "content")
+        assert mem._initialized
 
-    def test_recall_sync(self):
+    def test_recall_sync_auto_init(self):
         mem = AliveMemory(storage=":memory:")
-        import asyncio
-        asyncio.run(mem.initialize())
         ctx = mem.recall_sync("hello")
         assert isinstance(ctx, RecallContext)
+        assert mem._initialized
 
     def test_consolidate_sync(self):
         mem = AliveMemory(storage=":memory:")
-        import asyncio
-        asyncio.run(mem.initialize())
         report = mem.consolidate_sync()
-        assert report.moments_processed == 0  # no moments yet
+        assert report.moments_processed == 0
 
 
 # ── Version ──────────────────────────────────────────────────────
@@ -148,7 +144,7 @@ class TestSyncWrappers:
 
 def test_version():
     import alive_memory
-    assert alive_memory.__version__ == "0.1.0"
+    assert alive_memory.__version__ == "1.0.0a1"
 
 
 # ── OpenAI provider resolves ─────────────────────────────────────
