@@ -56,7 +56,7 @@ _OUTPUT_FORMAT_INSTRUCTIONS = (
     "- Output the FULL modified file content (not a diff)\n"
     "- Only include files you actually changed\n"
     "- Keep all existing function signatures unchanged\n"
-    "- Do NOT import any modules from alive_memory.evolve.*\n"
+    "- Do NOT import any modules from tools.evolve.*\n"
     "- Start your response with a one-sentence description of the change, "
     "then the code blocks\n"
 )
