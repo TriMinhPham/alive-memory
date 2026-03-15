@@ -71,14 +71,19 @@ class AliveMessageHistory(BaseChatMessageHistory):
             limit=self._recall_limit,
         )
         result: list[BaseMessage] = []
-        # Use journal entries as message history proxy.
-        # Entries from intake include "[role:ai]" or "[role:human]" prefix
-        # when stored via aadd_messages().
+        # Journal entries may include markdown headers from consolidation
+        # (e.g., "## 01:16 [id]\n\n[role:ai] hello"). Search anywhere
+        # in the entry for role tags, not just startswith().
         for entry in ctx.journal_entries:
-            if entry.startswith("[role:ai] "):
-                result.append(AIMessage(content=entry[len("[role:ai] "):]))
-            elif entry.startswith("[role:human] "):
-                result.append(HumanMessage(content=entry[len("[role:human] "):]))
+            if "[role:ai] " in entry:
+                # Extract content after the role tag
+                idx = entry.index("[role:ai] ")
+                content = entry[idx + len("[role:ai] "):]
+                result.append(AIMessage(content=content))
+            elif "[role:human] " in entry:
+                idx = entry.index("[role:human] ")
+                content = entry[idx + len("[role:human] "):]
+                result.append(HumanMessage(content=content))
             else:
                 result.append(HumanMessage(content=entry))
         return result
