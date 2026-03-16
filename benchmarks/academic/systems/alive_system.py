@@ -74,7 +74,7 @@ class AliveMemorySystem(MemorySystemAdapter):
 
             if openai_key:
                 from alive_memory.llm.openai import OpenAIProvider
-                model = config.get("llm_model", "gpt-4.1-mini")
+                model = config.get("llm_model", "gpt-4o-mini")
                 _inner = OpenAIProvider(api_key=openai_key, model=model)
             elif openrouter_key:
                 from alive_memory.llm.openrouter import OpenRouterProvider
