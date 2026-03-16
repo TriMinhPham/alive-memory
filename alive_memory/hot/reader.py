@@ -24,6 +24,12 @@ class MemoryReader:
     def root(self) -> Path:
         return self._root
 
+    def list_subdirs(self) -> list[str]:
+        """List all existing subdirectory names dynamically."""
+        if not self._root.is_dir():
+            return []
+        return sorted(d.name for d in self._root.iterdir() if d.is_dir())
+
     # ── Grep (primary recall) ────────────────────────────────────
 
     def grep_memory(
@@ -52,8 +58,7 @@ class MemoryReader:
         if not keywords:
             return []
 
-        search_dirs = subdirs or ["journal", "visitors", "threads",
-                                   "reflections", "self", "collection"]
+        search_dirs = subdirs or self.list_subdirs()
         results: list[dict[str, str]] = []
 
         for subdir in search_dirs:

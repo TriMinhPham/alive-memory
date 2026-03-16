@@ -85,6 +85,9 @@ async def consolidate(
     all_cold_echoes: list[dict] = []
     trait_cache: TraitCache = {}
 
+    # Get existing hot categories for LLM prompt
+    existing_categories = reader.list_subdirs() if reader else []
+
     # Step 2: Per-moment processing
     for moment in moments:
         cold_echoes: list[dict] = []
@@ -106,6 +109,7 @@ async def consolidate(
                 llm=llm,
                 cold_echoes=cold_echoes,
                 config=cfg,
+                existing_categories=existing_categories,
             )
 
             if result.text:
@@ -113,15 +117,22 @@ async def consolidate(
                 visitor_name = moment.metadata.get("visitor_name")
                 thread_id = moment.metadata.get("thread_id")
 
-                # Write reflection to hot memory
+                # Write reflection to hot memory (with dynamic categories)
                 counts = apply_reflection_to_hot_memory(
                     moment, result.text,
                     writer=writer,
                     visitor_name=visitor_name,
                     thread_id=thread_id,
+                    categories=result.categories,
                 )
                 report.journal_entries_written += counts.get("journal", 0)
                 report.reflections.append(result.text)
+
+                # Update existing categories for subsequent moments
+                if result.categories:
+                    for cat in result.categories:
+                        if cat and cat not in existing_categories:
+                            existing_categories.append(cat)
 
             # Write extracted facts (totems + traits) to storage
             if result.totems or result.traits:
@@ -218,6 +229,17 @@ async def consolidate(
                 except Exception:
                     logger.warning("Failed to embed moment %s to cold archive", moment.id, exc_info=True)
             report.cold_embeddings_added = embedded
+
+        # Prune old hot files (safe because raw events are now in cold)
+        if writer:
+            hot_max_days = int(cfg.get("consolidation.hot_max_days", 7))
+            for subdir in (reader.list_subdirs() if reader else []):
+                if subdir == "self":
+                    continue  # never prune self-knowledge
+                try:
+                    writer.prune_old_files(subdir, hot_max_days)
+                except Exception:
+                    logger.debug("Failed to prune %s", subdir, exc_info=True)
 
         # Flush processed moments from day_memory
         await storage.flush_day_memory()

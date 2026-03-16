@@ -2,12 +2,19 @@
 
 After the LLM reflects on a day moment (with hot context + cold echoes),
 this module writes the reflection outputs to the appropriate hot memory files.
+
+Supports both legacy fixed routing (journal/visitors/threads) and
+LLM-driven dynamic categories from the reflection result.
 """
 
 from __future__ import annotations
 
+import logging
+
 from alive_memory.hot.writer import MemoryWriter
 from alive_memory.types import DayMoment
+
+logger = logging.getLogger(__name__)
 
 
 def apply_reflection_to_hot_memory(
@@ -18,10 +25,12 @@ def apply_reflection_to_hot_memory(
     visitor_name: str | None = None,
     thread_id: str | None = None,
     self_updates: dict[str, str] | None = None,
+    categories: list[str] | None = None,
 ) -> dict[str, int]:
     """Apply a reflection's outputs to hot memory files.
 
-    Writes to journal, visitors, threads, self-knowledge as appropriate.
+    Writes to journal, visitors, threads, self-knowledge, and any
+    dynamic categories returned by the LLM.
 
     Args:
         moment: The original day moment.
@@ -30,11 +39,12 @@ def apply_reflection_to_hot_memory(
         visitor_name: If the moment involved a visitor, record notes about them.
         thread_id: If the moment is part of a thread, append thread context.
         self_updates: Dict of self-knowledge file → content to write.
+        categories: LLM-returned category names for dynamic routing.
 
     Returns:
         Dict counting writes by type: {journal: N, visitor: N, ...}
     """
-    counts = {"journal": 0, "visitor": 0, "thread": 0, "self": 0}
+    counts: dict[str, int] = {"journal": 0, "visitor": 0, "thread": 0, "self": 0, "dynamic": 0}
 
     # Always write a journal entry
     writer.append_journal(
@@ -67,5 +77,21 @@ def apply_reflection_to_hot_memory(
         for filename, content in self_updates.items():
             writer.write_self_file(filename, content)
             counts["self"] += 1
+
+    # Write to dynamic categories (skip legacy subdirs already handled above)
+    _legacy = {"journal", "visitors", "threads", "reflections", "self", "collection"}
+    if categories:
+        for cat in categories:
+            if not cat or cat.lower() in _legacy:
+                continue
+            try:
+                writer.append_to_category(
+                    cat,
+                    reflection_text,
+                    timestamp=moment.timestamp,
+                )
+                counts["dynamic"] += 1
+            except ValueError:
+                logger.debug("Skipping invalid category %r", cat)
 
     return counts
