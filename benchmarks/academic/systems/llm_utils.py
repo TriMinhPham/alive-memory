@@ -40,9 +40,11 @@ async def llm_answer(
     except ImportError:
         return "[error: httpx not installed]"
 
-    api_key = llm_config.get("api_key", os.environ.get("OPENROUTER_API_KEY", ""))
-    model = llm_config.get("model", "openai/gpt-4o-mini")
-    base_url = llm_config.get("base_url", "https://openrouter.ai/api/v1")
+    api_key = llm_config.get("api_key", os.environ.get(
+        "OPENAI_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""),
+    ))
+    model = llm_config.get("model", "gpt-4o-mini")
+    base_url = llm_config.get("base_url", "https://api.openai.com/v1")
 
     if context:
         prompt = (
