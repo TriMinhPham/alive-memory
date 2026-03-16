@@ -69,24 +69,21 @@ async def recall(
     hits = reader.grep_memory(query, limit=limit * 3)
     ctx.total_hits += len(hits)
 
+    _SUBDIR_MAP = {
+        "journal": "journal_entries",
+        "visitors": "visitor_notes",
+        "self": "self_knowledge",
+        "reflections": "reflections",
+        "threads": "thread_context",
+    }
+
     for hit in hits:
         subdir = hit.get("subdir", "")
         context = hit.get("context", hit.get("match", ""))
-
-        if subdir == "journal":
-            if len(ctx.journal_entries) < limit:
-                ctx.journal_entries.append(context)
-        elif subdir == "visitors":
-            if len(ctx.visitor_notes) < limit:
-                ctx.visitor_notes.append(context)
-        elif subdir == "self":
-            if len(ctx.self_knowledge) < limit:
-                ctx.self_knowledge.append(context)
-        elif subdir == "reflections":
-            if len(ctx.reflections) < limit:
-                ctx.reflections.append(context)
-        elif subdir == "threads" and len(ctx.thread_context) < limit:
-            ctx.thread_context.append(context)
+        field_name = _SUBDIR_MAP.get(subdir, "extra_context")
+        target_list = getattr(ctx, field_name)
+        if len(target_list) < limit:
+            target_list.append(context)
 
     # Step 4: Keyword search on structured facts (catches things not tied to a visitor)
     if storage is not None:

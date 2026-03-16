@@ -27,6 +27,7 @@ class ReflectionResult:
     text: str = ""
     totems: list[dict] = field(default_factory=list)
     traits: list[dict] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)
 
 
 async def reflect_on_moment(
@@ -37,6 +38,7 @@ async def reflect_on_moment(
     llm: LLMProvider,
     cold_echoes: list[dict] | None = None,
     config: AliveConfig | None = None,
+    existing_categories: list[str] | None = None,
 ) -> ReflectionResult:
     """Generate a reflection + extract facts for a single day moment.
 
@@ -77,8 +79,24 @@ async def reflect_on_moment(
 
     visitor_name = moment.metadata.get("visitor_name", "unknown")
 
+    # Build categories instruction
+    categories_text = ""
+    if existing_categories:
+        cats_list = ", ".join(existing_categories)
+        categories_text = (
+            f'\n4. "categories": An array of category names for filing this reflection.\n'
+            f"   Existing categories: {cats_list}\n"
+            "   Use existing categories when they fit. Only create a new category "
+            "   if none of the existing ones apply. Use lowercase, short names.\n\n"
+        )
+    else:
+        categories_text = (
+            '\n4. "categories": An array of category names for filing this reflection.\n'
+            '   Use lowercase, short names (e.g. "customers", "inventory", "complaints").\n\n'
+        )
+
     prompt = (
-        "Process this moment. Return a JSON object with three fields:\n\n"
+        "Process this moment. Return a JSON object with these fields:\n\n"
         '1. "reflection": A brief journal-style reflection (2-4 sentences). '
         "Focus on significance, feelings, and connections.\n\n"
         '2. "totems": An array of facts, entities, or concepts mentioned. Each has:\n'
@@ -93,6 +111,7 @@ async def reflect_on_moment(
         '   - "trait_key": specific attribute name (e.g. "gender_identity", "favorite_food")\n'
         '   - "trait_value": the observed value\n'
         '   - "confidence": 0.0-1.0\n\n'
+        f"{categories_text}"
         "Only extract facts clearly stated in the text. Do not infer.\n"
         "If no facts are found, use empty arrays.\n\n"
         f"The moment: {moment.content[:800]}\n"
@@ -129,6 +148,7 @@ async def reflect_on_moment(
             text=data.get("reflection", ""),
             totems=data.get("totems", []),
             traits=data.get("traits", []),
+            categories=data.get("categories", []),
         )
     except json.JSONDecodeError:
         # If JSON parsing fails, treat the whole response as reflection text

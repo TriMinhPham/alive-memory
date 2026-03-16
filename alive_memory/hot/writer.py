@@ -12,35 +12,160 @@ memory. Dates and times are preserved.
 from __future__ import annotations
 
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
 from alive_memory.hot.translator import scrub_numbers
 
+# Default pinned subdirectories — always created at init
+_DEFAULT_PINNED = ["journal", "visitors", "threads", "reflections", "self", "collection"]
+
 
 class MemoryWriter:
-    """Append-only writer for hot memory markdown files.
+    """Writer for hot memory markdown files with dynamic subdirectories.
+
+    Subdirectories can be created dynamically by the LLM during consolidation.
+    Pinned subdirs are always created at init. Subdir names are sanitized.
 
     Args:
         memory_dir: Root directory for hot memory files (e.g., /data/agent/memory).
+        pinned_subdirs: Subdirs to always create (default: journal, visitors, etc.).
+        max_subdirs: Safety cap on total subdirectory count.
     """
 
-    SUBDIRS = [
-        "journal",
-        "visitors",
-        "threads",
-        "reflections",
-        "self",
-        "collection",
-    ]
+    # Keep SUBDIRS for backward compat — code that references MemoryWriter.SUBDIRS
+    SUBDIRS = _DEFAULT_PINNED
 
-    def __init__(self, memory_dir: str | Path) -> None:
+    def __init__(
+        self,
+        memory_dir: str | Path,
+        *,
+        pinned_subdirs: list[str] | None = None,
+        max_subdirs: int = 20,
+    ) -> None:
         self._root = Path(memory_dir)
+        self._pinned = pinned_subdirs or list(_DEFAULT_PINNED)
+        self._max_subdirs = max_subdirs
         self._ensure_dirs()
 
     def _ensure_dirs(self) -> None:
-        for subdir in self.SUBDIRS:
+        for subdir in self._pinned:
             (self._root / subdir).mkdir(parents=True, exist_ok=True)
+
+    def _sanitize_subdir(self, name: str) -> str:
+        """Sanitize a subdirectory name: lowercase, alphanumeric + hyphens, max 30 chars."""
+        safe = re.sub(r"[^a-z0-9-]", "-", name.lower().strip())
+        safe = re.sub(r"-+", "-", safe).strip("-")[:30]
+        if not safe or safe in (".", ".."):
+            raise ValueError(f"Invalid category name: {name!r}")
+        return safe
+
+    def _ensure_subdir(self, name: str) -> Path:
+        """Create a subdirectory on demand (sanitized). Respects max_subdirs cap."""
+        safe = self._sanitize_subdir(name)
+        path = self._root / safe
+        if not path.is_dir():
+            existing = [d for d in self._root.iterdir() if d.is_dir()]
+            if len(existing) >= self._max_subdirs:
+                raise ValueError(
+                    f"Max subdirectories ({self._max_subdirs}) reached, "
+                    f"cannot create '{safe}'"
+                )
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def list_subdirs(self) -> list[str]:
+        """List all existing subdirectory names."""
+        if not self._root.is_dir():
+            return []
+        return sorted(d.name for d in self._root.iterdir() if d.is_dir())
+
+    # ── Generic append (for dynamic categories) ───────────────────
+
+    def append_to_category(
+        self,
+        category: str,
+        content: str,
+        *,
+        filename: str | None = None,
+        timestamp: datetime | None = None,
+    ) -> Path:
+        """Append content to a dynamic category subdirectory.
+
+        Creates the subdir if it doesn't exist (sanitized name).
+        """
+        safe_cat = self._sanitize_subdir(category)
+        self._ensure_subdir(safe_cat)
+        ts = timestamp or datetime.now(UTC)
+        date_str = ts.strftime("%Y-%m-%d")
+        fname = filename or f"{date_str}.md"
+        if not fname.endswith(".md"):
+            fname += ".md"
+        filepath = self._root / safe_cat / fname
+
+        time_str = ts.strftime("%H:%M")
+        with open(filepath, "a", encoding="utf-8") as f:
+            if not filepath.exists() or os.path.getsize(filepath) == 0:
+                f.write(f"# {category.title()} — {date_str}\n")
+            f.write(f"\n## {time_str}\n\n")
+            f.write(scrub_numbers(content.strip()))
+            f.write("\n")
+
+        return filepath
+
+    # ── Rewrite (for distillation) ────────────────────────────────
+
+    def rewrite_file(self, subdir: str, filename: str, content: str) -> Path:
+        """Overwrite a file in any subdirectory (used for distillation)."""
+        safe_sub = self._sanitize_subdir(subdir)
+        self._ensure_subdir(safe_sub)
+        filepath = self._root / safe_sub / filename
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(scrub_numbers(content))
+        return filepath
+
+    # ── Pruning ───────────────────────────────────────────────────
+
+    def prune_old_files(self, subdir: str, max_age_days: int) -> int:
+        """Remove files older than max_age_days from a subdirectory.
+
+        Only removes files with YYYY-MM-DD in the name (date-based files).
+        Returns count of files removed.
+        """
+        dir_path = self._root / subdir
+        if not dir_path.is_dir():
+            return 0
+        cutoff = datetime.now(UTC)
+        count = 0
+        for filepath in dir_path.glob("*.md"):
+            # Try to extract date from filename
+            match = re.search(r"(\d{4}-\d{2}-\d{2})", filepath.stem)
+            if not match:
+                continue
+            try:
+                file_date = datetime.strptime(match.group(1), "%Y-%m-%d").replace(
+                    tzinfo=UTC
+                )
+                age_days = (cutoff - file_date).days
+                if age_days > max_age_days:
+                    filepath.unlink()
+                    count += 1
+            except ValueError:
+                continue
+        return count
+
+    def total_token_estimate(self) -> int:
+        """Estimate total tokens across all hot memory files (~4 chars/token)."""
+        total_chars = 0
+        if not self._root.is_dir():
+            return 0
+        for filepath in self._root.rglob("*.md"):
+            try:
+                total_chars += filepath.stat().st_size
+            except OSError:
+                continue
+        return total_chars // 4
 
     @property
     def root(self) -> Path:
