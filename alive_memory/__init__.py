@@ -307,6 +307,15 @@ class AliveMemory:
         from alive_memory.intake.formation import form_moment
         from alive_memory.intake.thalamus import perceive
 
+        # Extract identity keywords from self-model for identity-aware salience
+        identity_kws: list[str] | None = None
+        try:
+            self_model = await self._storage.get_self_model()
+            if self_model.traits:
+                identity_kws = list(self_model.traits.keys())[:10]
+        except Exception:
+            pass
+
         # Step 1: Perceive
         perception = perceive(
             event_type, content,
@@ -314,6 +323,7 @@ class AliveMemory:
             metadata=metadata,
             timestamp=timestamp,
             clock=self._clock,
+            identity_keywords=identity_kws,
         )
 
         # Step 2: Affect lens
@@ -438,6 +448,7 @@ class AliveMemory:
             config=self._config,
             storage=self._storage,
             visitor_id=visitor_id,
+            embedder=self._embedder,
         )
 
     # ── Consolidation ────────────────────────────────────────────

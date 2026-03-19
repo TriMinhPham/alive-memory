@@ -23,6 +23,7 @@ def perceive(
     metadata: dict[str, Any] | None = None,
     timestamp: datetime | None = None,
     clock: Clock | None = None,
+    identity_keywords: list[str] | None = None,
 ) -> Perception:
     """Convert a raw event into a structured Perception.
 
@@ -52,7 +53,7 @@ def perceive(
     meta = metadata or {}
 
     # Compute salience
-    salience = _compute_salience(et, content, cfg, meta)
+    salience = _compute_salience(et, content, cfg, meta, identity_keywords)
 
     return Perception(
         event_type=et,
@@ -68,6 +69,7 @@ def _compute_salience(
     content: str,
     config: AliveConfig,
     metadata: dict[str, Any],
+    identity_keywords: list[str] | None = None,
 ) -> float:
     """Compute salience score (0-1) for a perception.
 
@@ -75,7 +77,14 @@ def _compute_salience(
     - Base salience from config
     - Boost for conversations (social interaction)
     - Novelty bonus from content length and uniqueness signals
+    - Identity boost when content matches agent's identity keywords
+
+    If metadata contains a "salience" key, it overrides the heuristic entirely.
     """
+    # Metadata override — skip all heuristics
+    if "salience" in metadata:
+        return float(max(0.0, min(1.0, float(metadata["salience"]))))
+
     base = config.get("intake.base_salience", 0.5)
 
     # Conversation boost
@@ -87,9 +96,12 @@ def _compute_salience(
     novelty = _estimate_novelty(content)
     base += novelty * novelty_weight
 
-    # Metadata overrides
-    if "salience" in metadata:
-        base = float(metadata["salience"])
+    # Identity boost — events matching agent's identity get higher salience
+    if identity_keywords:
+        content_lower = content.lower()
+        identity_boost = config.get("intake.identity_boost", 0.15)
+        if any(kw.lower() in content_lower for kw in identity_keywords):
+            base += identity_boost
 
     return float(max(0.0, min(1.0, base)))
 

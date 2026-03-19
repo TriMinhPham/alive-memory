@@ -85,6 +85,9 @@ async def consolidate(
     all_cold_echoes: list[dict] = []
     trait_cache: TraitCache = {}
 
+    # Get existing hot categories for LLM prompt
+    existing_categories = reader.list_subdirs() if reader else []
+
     # Step 2: Per-moment processing
     for moment in moments:
         cold_echoes: list[dict] = []
@@ -106,6 +109,7 @@ async def consolidate(
                 llm=llm,
                 cold_echoes=cold_echoes,
                 config=cfg,
+                existing_categories=existing_categories,
             )
 
             if result.text:
@@ -113,15 +117,22 @@ async def consolidate(
                 visitor_name = moment.metadata.get("visitor_name")
                 thread_id = moment.metadata.get("thread_id")
 
-                # Write reflection to hot memory
+                # Write reflection to hot memory (with dynamic categories)
                 counts = apply_reflection_to_hot_memory(
                     moment, result.text,
                     writer=writer,
                     visitor_name=visitor_name,
                     thread_id=thread_id,
+                    categories=result.categories,
                 )
                 report.journal_entries_written += counts.get("journal", 0)
                 report.reflections.append(result.text)
+
+                # Update existing categories for subsequent moments
+                if result.categories:
+                    for cat in result.categories:
+                        if cat and cat not in existing_categories:
+                            existing_categories.append(cat)
 
             # Write extracted facts (totems + traits) to storage
             if result.totems or result.traits:
@@ -129,6 +140,7 @@ async def consolidate(
                     await write_extracted_facts(
                         moment, totems=result.totems, traits=result.traits,
                         storage=storage, trait_cache=trait_cache,
+                        embedder=embedder,
                     )
                 except Exception:
                     logger.debug("Fact writing failed for moment %s", moment.id, exc_info=True)
@@ -183,13 +195,28 @@ async def consolidate(
             )
             report.dreams = dreams
 
-        # Batch embed to cold archive (max 50 per cycle)
+        # Batch embed to cold archive — all moments (no cap)
+        embedded = 0
         if embedder:
-            embed_limit = int(cfg.get("consolidation.cold_embed_limit", 50))
-            embedded = 0
-            for moment in moments[:embed_limit]:
+            for moment in moments:
                 try:
-                    embedding = await embedder.embed(moment.content)
+                    # Truncate to ~7000 chars to stay within embedding model token limits
+                    embed_text = moment.content[:7000] if len(moment.content) > 7000 else moment.content
+                    embedding = await embedder.embed(embed_text)
+                    # Write to unified cold_memory table
+                    await storage.store_cold_memory(
+                        content=moment.content,
+                        embedding=embedding,
+                        entry_type="event",
+                        raw_content=moment.content,
+                        metadata={
+                            "event_type": moment.event_type.value,
+                            "valence": moment.valence,
+                            "salience": moment.salience,
+                        },
+                        source_moment_id=moment.id,
+                    )
+                    # Also write to legacy cold_embeddings for backward compat
                     await storage.store_cold_embedding(
                         content=moment.content,
                         embedding=embedding,
@@ -204,6 +231,20 @@ async def consolidate(
                 except Exception:
                     logger.warning("Failed to embed moment %s to cold archive", moment.id, exc_info=True)
             report.cold_embeddings_added = embedded
+
+        # Prune old hot files (safe because raw events are now in cold).
+        # Only prune if cold_memory has been populated (this consolidation
+        # cycle wrote to it), otherwise we'd lose pre-upgrade hot files
+        # that haven't been backfilled yet.
+        if writer and embedded > 0:
+            hot_max_days = int(cfg.get("consolidation.hot_max_days", 7))
+            for subdir in (reader.list_subdirs() if reader else []):
+                if subdir == "self":
+                    continue  # never prune self-knowledge
+                try:
+                    writer.prune_old_files(subdir, hot_max_days)
+                except Exception:
+                    logger.debug("Failed to prune %s", subdir, exc_info=True)
 
         # Flush processed moments from day_memory
         await storage.flush_day_memory()
