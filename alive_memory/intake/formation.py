@@ -24,8 +24,10 @@ from alive_memory.types import (
     Perception,
 )
 
-# Maximum moments in day memory before eviction kicks in
-MAX_DAY_MOMENTS = 30
+# Maximum moments in day memory before eviction kicks in.
+# Raised from 30 → 500: consolidation costs ~$0.005/day, no budget reason
+# for a tight cap. Eviction still works as a safety valve at high counts.
+MAX_DAY_MOMENTS = 500
 
 # Dedup window in minutes — ignore near-duplicate content within this window
 DEDUP_WINDOW_MINUTES = 30

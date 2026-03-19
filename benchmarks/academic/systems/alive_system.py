@@ -65,13 +65,18 @@ class AliveMemorySystem(MemorySystemAdapter):
         self._llm_calls = 0
         self._llm_tokens = 0
 
+        openai_key = os.environ.get("OPENAI_API_KEY", "")
         openrouter_key = config.get("api_key", os.environ.get("OPENROUTER_API_KEY", ""))
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
         try:
             from alive_memory.llm.provider import LLMResponse
 
-            if openrouter_key:
+            if openai_key:
+                from alive_memory.llm.openai import OpenAIProvider
+                model = config.get("llm_model", "gpt-4o-mini")
+                _inner = OpenAIProvider(api_key=openai_key, model=model)
+            elif openrouter_key:
                 from alive_memory.llm.openrouter import OpenRouterProvider
                 model = config.get("llm_model", "openai/gpt-4o-mini")
                 _inner = OpenRouterProvider(api_key=openrouter_key, model=model)
@@ -96,11 +101,15 @@ class AliveMemorySystem(MemorySystemAdapter):
         except ImportError:
             pass
 
+        # Use OpenAI embeddings if key available, otherwise local (hash-based)
+        embedder = "openai" if openai_key else "local"
+
         self._memory = AliveMemory(
             storage=self._db_path,
             memory_dir=memory_dir,
             config=sdk_config or None,
             llm=llm,
+            embedder=embedder,
         )
         await self._memory.initialize()
         self._turn_count = 0

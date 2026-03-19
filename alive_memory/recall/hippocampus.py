@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 
 from alive_memory.config import AliveConfig
+from alive_memory.embeddings.base import EmbeddingProvider
 from alive_memory.hot.reader import MemoryReader
 from alive_memory.storage.base import BaseStorage
 from alive_memory.types import CognitiveState, RecallContext
@@ -29,6 +30,7 @@ async def recall(
     config: AliveConfig | None = None,
     storage: BaseStorage | None = None,
     visitor_id: str | None = None,
+    embedder: EmbeddingProvider | None = None,
 ) -> RecallContext:
     """Retrieve context relevant to a query.
 
@@ -67,24 +69,21 @@ async def recall(
     hits = reader.grep_memory(query, limit=limit * 3)
     ctx.total_hits += len(hits)
 
+    _SUBDIR_MAP = {
+        "journal": "journal_entries",
+        "visitors": "visitor_notes",
+        "self": "self_knowledge",
+        "reflections": "reflections",
+        "threads": "thread_context",
+    }
+
     for hit in hits:
         subdir = hit.get("subdir", "")
         context = hit.get("context", hit.get("match", ""))
-
-        if subdir == "journal":
-            if len(ctx.journal_entries) < limit:
-                ctx.journal_entries.append(context)
-        elif subdir == "visitors":
-            if len(ctx.visitor_notes) < limit:
-                ctx.visitor_notes.append(context)
-        elif subdir == "self":
-            if len(ctx.self_knowledge) < limit:
-                ctx.self_knowledge.append(context)
-        elif subdir == "reflections":
-            if len(ctx.reflections) < limit:
-                ctx.reflections.append(context)
-        elif subdir == "threads" and len(ctx.thread_context) < limit:
-            ctx.thread_context.append(context)
+        field_name = _SUBDIR_MAP.get(subdir, "extra_context")
+        target_list = getattr(ctx, field_name)
+        if len(target_list) < limit:
+            target_list.append(context)
 
     # Step 4: Keyword search on structured facts (catches things not tied to a visitor)
     if storage is not None:
@@ -108,7 +107,31 @@ async def recall(
         except Exception:
             logger.debug("Trait search failed", exc_info=True)
 
-    # Step 5: Fill gaps with recent context
+    # Step 5: Semantic cold search (catches what keyword grep misses)
+    if embedder is not None and storage is not None:
+        try:
+            query_vec = await embedder.embed(query)
+            cold_hits = await storage.search_cold_memory(
+                query_vec, limit=limit,
+            )
+            _seen = {e for e in ctx.journal_entries}
+            _seen.update(ctx.visitor_notes)
+            _seen.update(ctx.totem_facts)
+            _seen.update(ctx.trait_facts)
+            min_score = 0.3  # filter out unrelated hits
+            for hit in cold_hits:
+                if hit.get("cosine_score", 0) < min_score:
+                    continue
+                content = hit["content"]
+                if content in _seen:
+                    continue
+                _seen.add(content)
+                _merge_cold_hit(hit, ctx)
+                ctx.total_hits += 1
+        except Exception:
+            logger.debug("Semantic cold search failed", exc_info=True)
+
+    # Step 6: Fill gaps with recent context
     if len(ctx.journal_entries) < 3:
         recent = reader.read_recent_journal(days=2, max_entries=3)
         for entry in recent:
@@ -185,6 +208,23 @@ async def _fetch_visitor_context(
             ctx.total_hits += 1
     except Exception:
         logger.debug("Trait lookup failed for %s", visitor_id, exc_info=True)
+
+
+def _merge_cold_hit(hit: dict, ctx: RecallContext) -> None:
+    """Route a cold memory hit into the appropriate RecallContext bucket."""
+    content = hit["content"]
+    entry_type = hit.get("entry_type", "event")
+    if entry_type == "totem":
+        ctx.totem_facts.append(content)
+    elif entry_type == "trait":
+        ctx.trait_facts.append(content)
+    elif entry_type == "event":
+        # Route to journal_entries so events appear in to_prompt() output
+        ctx.journal_entries.append(content)
+        # Also keep in cold_echoes for internal tracking
+        ctx.cold_echoes.append(content)
+    else:
+        ctx.extra_context.append(content)
 
 
 def _format_totem(totem) -> str:
