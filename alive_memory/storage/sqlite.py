@@ -748,10 +748,65 @@ class SQLiteStorage(BaseStorage):
                 "metadata": json.loads(row["metadata"] or "{}"),
                 "score": score,
                 "cosine_score": cosine,
+                "session_id": row["session_id"],
+                "turn_index": row["turn_index"],
+                "role": row["role"],
+                "created_at": row["created_at"],
             }))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item for _, item in scored[:limit]]
+
+    # ── Raw Turn Retrieval ────────────────────────────────────────────
+
+    async def get_turns_by_session(
+        self,
+        session_id: str,
+        *,
+        start_turn: int | None = None,
+        end_turn: int | None = None,
+    ) -> list[dict[str, Any]]:
+        conn = await self._get_db()
+        base = """SELECT id, content, raw_content, entry_type, session_id,
+                         turn_index, role, created_at
+                  FROM cold_memory
+                  WHERE session_id = ? AND entry_type = 'raw_turn'"""
+        params: list[Any] = [session_id]
+        if start_turn is not None:
+            base += " AND turn_index >= ?"
+            params.append(start_turn)
+        if end_turn is not None:
+            base += " AND turn_index <= ?"
+            params.append(end_turn)
+        base += " ORDER BY turn_index ASC"
+        cursor = await conn.execute(base, tuple(params))
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "content": row["content"],
+                "raw_content": row["raw_content"],
+                "entry_type": row["entry_type"],
+                "session_id": row["session_id"],
+                "turn_index": row["turn_index"],
+                "role": row["role"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    async def get_neighboring_turns(
+        self,
+        session_id: str,
+        turn_index: int,
+        *,
+        window: int = 3,
+    ) -> list[dict[str, Any]]:
+        return await self.get_turns_by_session(
+            session_id,
+            start_turn=max(0, turn_index - window),
+            end_turn=turn_index + window,
+        )
 
     # ── Totems (Semantic Facts) ────────────────────────────────────
 
@@ -1018,6 +1073,7 @@ class SQLiteStorage(BaseStorage):
             "CREATE INDEX IF NOT EXISTS idx_cold_memory_session ON cold_memory(session_id)",
             "CREATE INDEX IF NOT EXISTS idx_cold_memory_session_time ON cold_memory(session_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_cold_memory_session_type ON cold_memory(session_id, entry_type, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_cold_memory_turn ON cold_memory(session_id, entry_type, turn_index)",
         ]
         for sql in indexes:
             with contextlib.suppress(Exception):
