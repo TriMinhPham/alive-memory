@@ -9,7 +9,7 @@ _TEMPORAL_PATTERNS: dict[str, str] = {
     "after": r"\bafter\b",
     "when": r"\bwhen\b",
     "first": r"\bfirst\b",
-    "latest": r"\b(?:latest|most recent|last)\b",
+    "latest": r"\b(?:latest|most recent)\b",
     "last_week": r"\blast week\b",
     "yesterday": r"\byesterday\b",
 }

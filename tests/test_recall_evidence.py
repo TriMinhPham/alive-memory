@@ -94,6 +94,32 @@ async def test_raw_turn_stored_at_intake() -> None:
 
 
 @pytest.mark.asyncio
+async def test_raw_turn_preserves_zero_turn_index() -> None:
+    """Turn index 0 should be preserved (not treated as falsy)."""
+    embedder = FakeEmbedder()
+    tmp = tempfile.mkdtemp()
+    db = os.path.join(tmp, "test.db")
+    memory = AliveMemory(
+        storage=db, memory_dir=tmp, embedder=embedder,
+        config={"intake": {"salience_threshold": 0.0}},
+    )
+    await memory.initialize()
+
+    await memory.intake(
+        "conversation", "First turn",
+        metadata={"session_id": "s1", "turn_index": 0, "role": "user"},
+    )
+
+    turns = await memory.storage.get_turns_by_session("s1")
+    assert len(turns) == 1
+    assert turns[0]["turn_index"] == 0  # must be 0, not None
+
+    await memory.close()
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+@pytest.mark.asyncio
 async def test_get_neighboring_turns(storage: SQLiteStorage) -> None:
     """Neighbor expansion returns surrounding context."""
     vec = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -204,6 +230,11 @@ def test_pack_context_trust_order() -> None:
         raw_turns=["raw evidence here"],
         journal_entries=["journal entry here"],
         reflections=["reflection here"],
+        evidence_blocks=[
+            EvidenceBlock(text="raw evidence here", source_type="raw_turn", trust_rank=1),
+            EvidenceBlock(text="journal entry here", source_type="journal", trust_rank=4),
+            EvidenceBlock(text="reflection here", source_type="reflection", trust_rank=5),
+        ],
         query="test",
     )
     result = system._pack_context(ctx, token_budget=10000)
@@ -268,6 +299,13 @@ def test_detect_temporal_hints() -> None:
     assert hints.get("first") is True
 
     hints = detect_temporal_hints("What is the latest update on the project?")
+    assert hints.get("latest") is True
+
+    # "last" alone should NOT trigger "latest" (e.g. "last week" is a period)
+    hints = detect_temporal_hints("What happened last time?")
+    assert hints.get("latest") is None
+
+    hints = detect_temporal_hints("What is the most recent change?")
     assert hints.get("latest") is True
 
 

@@ -309,6 +309,7 @@ class BaseStorage(ABC):
         session_id: str | None = None,
         turn_index: int | None = None,
         role: str | None = None,
+        created_at: str | None = None,
     ) -> str:
         """Store an entry in the unified cold memory archive. Returns entry ID."""
         ...

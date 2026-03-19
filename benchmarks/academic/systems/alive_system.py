@@ -168,65 +168,35 @@ class AliveMemorySystem(MemorySystemAdapter):
             tracker=self._tracker,
         )
 
-    def _build_ordered_evidence(self, ctx) -> list[tuple[str, str, int]]:
-        """Extract evidence in trust order: (text, section_label, trust_rank)."""
-        evidence: list[tuple[str, str, int]] = []
-
-        # Rank 1: Raw verbatim turns (highest trust)
-        for item in ctx.raw_turns:
-            evidence.append((item, "Verbatim Evidence", 1))
-
-        # Rank 2: Structured facts
-        for item in ctx.totem_facts:
-            evidence.append((item, "Known Facts", 2))
-        for item in ctx.trait_facts:
-            evidence.append((item, "Traits", 2))
-
-        # Rank 3: Thread / visitor context
-        for item in getattr(ctx, "thread_context", []):
-            evidence.append((item, "Conversation", 3))
-        for item in ctx.visitor_notes:
-            evidence.append((item, "Visitor Notes", 3))
-
-        # Rank 4: Journal entries
-        for item in ctx.journal_entries:
-            evidence.append((item, "Journal Entries", 4))
-
-        # Rank 5: Reflections, self-knowledge, cold echoes
-        for item in ctx.reflections:
-            evidence.append((item, "Reflections", 5))
-        for item in ctx.self_knowledge:
-            evidence.append((item, "Knowledge", 5))
-        for item in getattr(ctx, "cold_echoes", []):
-            evidence.append((item, "Historical Echoes", 5))
-
-        # Rank 6: Extra context
-        for item in getattr(ctx, "extra_context", []):
-            evidence.append((item, "Additional Context", 6))
-
-        # Already in trust order by construction
-        return evidence
+    _TRUST_LABEL = {
+        "raw_turn": "Verbatim Evidence",
+        "totem": "Known Facts",
+        "trait": "Traits",
+        "visitor": "Visitor Notes",
+        "journal": "Journal Entries",
+        "reflection": "Reflections",
+        "thread": "Conversation",
+    }
 
     def _pack_context(self, ctx, token_budget: int = 12000) -> str:
-        """Pack evidence into a budget, trust-ordered.
+        """Pack evidence into a budget using ranked evidence_blocks.
 
-        Fills the budget greedily in trust order. Deduplicates.
-        Renders sections grouped by label.
+        Uses the recency-aware ranked evidence produced by recall(),
+        then fills remaining budget from bucket lists as fallback.
+        Deduplicates across all sources.
         """
-        evidence = self._build_ordered_evidence(ctx)
-
         sections: dict[str, list[str]] = {}
         section_order: list[str] = []
         used_tokens = 0
         seen: set[str] = set()
 
-        for text, section, _rank in evidence:
+        def _add(text: str, section: str) -> None:
+            nonlocal used_tokens
             if text in seen:
-                continue
-            # Cheap token estimate: chars / 4
+                return
             est_tokens = len(text) // 4
             if used_tokens + est_tokens > token_budget:
-                continue
+                return
             seen.add(text)
             if section not in sections:
                 sections[section] = []
@@ -234,7 +204,29 @@ class AliveMemorySystem(MemorySystemAdapter):
             sections[section].append(text)
             used_tokens += est_tokens
 
-        # Render sections in order of first appearance (preserves trust order)
+        # Primary: use ranked evidence_blocks (preserves recency ordering)
+        for eb in getattr(ctx, "evidence_blocks", []):
+            label = self._TRUST_LABEL.get(eb.source_type, "Additional Context")
+            _add(eb.text, label)
+
+        # Fallback: fill from bucket lists for items not in evidence_blocks
+        _FALLBACK = [
+            (getattr(ctx, "raw_turns", []), "Verbatim Evidence"),
+            (ctx.totem_facts, "Known Facts"),
+            (ctx.trait_facts, "Traits"),
+            (ctx.visitor_notes, "Visitor Notes"),
+            (getattr(ctx, "thread_context", []), "Conversation"),
+            (ctx.journal_entries, "Journal Entries"),
+            (ctx.reflections, "Reflections"),
+            (ctx.self_knowledge, "Knowledge"),
+            (getattr(ctx, "cold_echoes", []), "Historical Echoes"),
+            (getattr(ctx, "extra_context", []), "Additional Context"),
+        ]
+        for items, label in _FALLBACK:
+            for text in items:
+                _add(text, label)
+
+        # Render sections in order of first appearance
         parts: list[str] = []
         for section in section_order:
             items = sections[section]

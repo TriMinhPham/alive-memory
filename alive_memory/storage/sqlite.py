@@ -682,6 +682,7 @@ class SQLiteStorage(BaseStorage):
         session_id: str | None = None,
         turn_index: int | None = None,
         role: str | None = None,
+        created_at: str | None = None,
     ) -> str:
         entry_id = str(uuid.uuid4())
         await self._exec_write(
@@ -701,7 +702,7 @@ class SQLiteStorage(BaseStorage):
                 category,
                 json.dumps(metadata or {}),
                 source_moment_id,
-                _now_iso(),
+                created_at or _now_iso(),
                 session_id,
                 turn_index,
                 role,
