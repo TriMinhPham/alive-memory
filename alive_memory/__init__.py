@@ -381,8 +381,9 @@ class AliveMemory:
                 if meta.get("timestamp"):
                     cold_meta["source_timestamp"] = meta["timestamp"]
 
-                # Use source timestamp if available for correct chronology
-                source_ts = meta.get("timestamp")
+                # Use source timestamp for correct chronology:
+                # prefer metadata["timestamp"], fall back to intake timestamp= arg
+                source_ts = meta.get("timestamp") or timestamp
                 if isinstance(source_ts, datetime):
                     source_ts = source_ts.isoformat()
 

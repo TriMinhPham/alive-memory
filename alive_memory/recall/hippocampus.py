@@ -174,11 +174,11 @@ async def recall(
         except Exception:
             logger.debug("Trait search failed", exc_info=True)
 
-    # Step 7: Semantic cold search (events only — raw_turns already searched)
+    # Step 7: Semantic cold search (all types except raw_turn, already searched)
     if query_vec is not None and storage is not None:
         try:
             cold_hits = await storage.search_cold_memory(
-                query_vec, limit=limit, entry_type=ColdEntryType.EVENT,
+                query_vec, limit=limit,
             )
             _seen = set(ctx.journal_entries) | set(ctx.visitor_notes)
             _seen.update(ctx.totem_facts)
@@ -187,6 +187,9 @@ async def recall(
             min_score = 0.3
             for hit in cold_hits:
                 if hit.get("cosine_score", 0) < min_score:
+                    continue
+                # Skip raw_turn entries (already searched in step 2)
+                if hit.get("entry_type") == ColdEntryType.RAW_TURN:
                     continue
                 content = hit["content"]
                 if content in _seen:
@@ -226,7 +229,9 @@ async def recall(
         ))
 
     # Step 10: Rank evidence and compute confidence
-    ctx.evidence_blocks = rank_with_recency(ctx.evidence_blocks)
+    # Skip recency re-ranking when temporal hints request oldest-first
+    if not temporal_hints.get("first"):
+        ctx.evidence_blocks = rank_with_recency(ctx.evidence_blocks)
     ctx.confidence, ctx.abstain_recommended = compute_confidence(
         ctx.evidence_blocks, ctx.total_hits,
     )
