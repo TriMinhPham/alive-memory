@@ -175,7 +175,7 @@ async def consolidate(
                 config=cfg,
                 existing_categories=existing_categories,
             )
-            _apply_reflection(
+            await _apply_reflection(
                 moment, result, writer, storage, trait_cache,
                 existing_categories, report,
             )
@@ -199,7 +199,7 @@ async def consolidate(
                 existing_categories=existing_categories,
             )
             # Apply batch result to first moment (for hot memory filing)
-            _apply_reflection(
+            await _apply_reflection(
                 batch[0], result, writer, storage, trait_cache,
                 existing_categories, report,
             )
@@ -223,7 +223,7 @@ async def consolidate(
                 config=cfg,
                 existing_categories=existing_categories,
             )
-            _apply_reflection(
+            await _apply_reflection(
                 low_moments[0], result, writer, storage, trait_cache,
                 existing_categories, report,
             )
