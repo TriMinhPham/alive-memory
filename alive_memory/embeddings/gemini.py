@@ -39,7 +39,7 @@ class GeminiEmbedder:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-embedding-exp-03-07",
+        model: str = "gemini-embedding-2-preview",
         task_type: str = "RETRIEVAL_QUERY",
         output_dimensionality: int = 3072,
         max_retries: int = 3,
