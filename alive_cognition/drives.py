@@ -134,13 +134,26 @@ def update_mood(
     # Hard floor
     new_valence = max(new_valence, -0.85)
 
+    final_valence = clamp(new_valence, -1.0, 1.0)
+    final_arousal = clamp(new_arousal)
+
+    # Desperation quadrant detection (high-arousal + low-valence).
+    # Paper: "Emotion Concepts and their Function in a Large Language Model"
+    # (Transformer Circuits, April 2026) shows this quadrant drives misaligned
+    # behavior.  When detected, apply calming arousal pressure.
+    desperate = final_valence < -0.3 and final_arousal > 0.6
+    if desperate:
+        # Dampen arousal toward the 0.6 boundary to reduce desperation intensity
+        final_arousal = clamp(final_arousal - 0.05 * (final_arousal - 0.6))
+
     # Determine mood word
-    word = _valence_to_word(new_valence, new_arousal)
+    word = _valence_to_word(final_valence, final_arousal)
 
     return MoodState(
-        valence=clamp(new_valence, -1.0, 1.0),
-        arousal=clamp(new_arousal),
+        valence=final_valence,
+        arousal=final_arousal,
         word=word,
+        is_desperate=desperate,
     )
 
 

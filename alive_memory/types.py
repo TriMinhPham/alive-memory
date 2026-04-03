@@ -53,11 +53,12 @@ class DayMoment:
     content: str
     event_type: EventType
     salience: float  # 0-1, computed deterministically
-    valence: float  # -1 to 1
+    valence: float  # -1 to 1, agent's operative emotion
     drive_snapshot: dict[str, float]  # drive levels at time of moment
     timestamp: datetime
     processed: bool = False  # marked True after consolidation
     nap_processed: bool = False  # marked True after nap processes it
+    other_valence: float = 0.0  # -1 to 1, inferred other-speaker emotion
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -208,7 +209,7 @@ class RecallContext:
                 if score is not None:
                     parts.append(f"score={score:.2f}")
                 lines.append(f"- {' | '.join(parts)}")
-            sections.append(f"### Visual References\n" + "\n".join(lines))
+            sections.append("### Visual References\n" + "\n".join(lines))
         if not sections:
             return ""
         return "## Relevant Context\n\n" + "\n\n".join(sections)
@@ -283,6 +284,7 @@ class MoodState:
     valence: float = 0.0  # -1 to 1
     arousal: float = 0.5  # 0 to 1
     word: str = "neutral"
+    is_desperate: bool = False  # high-arousal + low-valence safety flag
 
 
 @dataclass

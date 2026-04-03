@@ -56,6 +56,10 @@ def _now_iso() -> str:
 
 
 def _row_to_moment(row: aiosqlite.Row) -> DayMoment:
+    # other_valence column may not exist on older databases
+    other_val = 0.0
+    with contextlib.suppress(IndexError, KeyError):
+        other_val = row["other_valence"] or 0.0
     return DayMoment(
         id=row["id"],
         content=row["content"],
@@ -66,6 +70,7 @@ def _row_to_moment(row: aiosqlite.Row) -> DayMoment:
         timestamp=datetime.fromisoformat(row["timestamp"]),
         processed=bool(row["processed"]),
         nap_processed=bool(row["nap_processed"]),
+        other_valence=other_val,
         metadata=json.loads(row["metadata"] or "{}"),
     )
 
@@ -116,8 +121,8 @@ class SQLiteStorage(BaseStorage):
         await self._exec_write(
             """INSERT INTO day_memory
                (id, content, event_type, salience, valence, drive_snapshot,
-                timestamp, processed, nap_processed, metadata)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                timestamp, processed, nap_processed, other_valence, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 moment.id,
                 moment.content,
@@ -128,6 +133,7 @@ class SQLiteStorage(BaseStorage):
                 moment.timestamp.isoformat(),
                 int(moment.processed),
                 int(moment.nap_processed),
+                moment.other_valence,
                 json.dumps(moment.metadata),
             ),
         )
@@ -307,10 +313,12 @@ class SQLiteStorage(BaseStorage):
         cursor = await conn.execute("SELECT * FROM mood_state WHERE id = 1")
         row = await cursor.fetchone()
         assert row is not None, "mood_state row with id=1 must exist"
+        v, a = row["valence"], row["arousal"]
         return MoodState(
-            valence=row["valence"],
-            arousal=row["arousal"],
+            valence=v,
+            arousal=a,
             word=row["word"],
+            is_desperate=v < -0.3 and a > 0.6,
         )
 
     async def set_mood_state(self, state: MoodState) -> None:
@@ -1003,6 +1011,8 @@ class SQLiteStorage(BaseStorage):
             "ALTER TABLE totems ADD COLUMN source_turn_id TEXT",
             "ALTER TABLE totems ADD COLUMN first_seen_at TEXT",
             "ALTER TABLE totems ADD COLUMN last_seen_at TEXT",
+            # 08b: Dual-perspective emotion tracking (other-speaker valence)
+            "ALTER TABLE day_memory ADD COLUMN other_valence REAL NOT NULL DEFAULT 0.0",
             # S6: Strengthen trait provenance
             "ALTER TABLE visitor_traits ADD COLUMN source_session_id TEXT",
             "ALTER TABLE visitor_traits ADD COLUMN source_turn_id TEXT",
