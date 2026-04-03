@@ -14,12 +14,11 @@ from difflib import SequenceMatcher
 
 from alive_memory.clock import Clock, SystemClock
 from alive_memory.config import AliveConfig
-from alive_memory.intake.affect import compute_valence
+from alive_memory.intake.affect import compute_other_valence, compute_valence
 from alive_memory.storage.base import BaseStorage
 from alive_memory.types import (
     DayMoment,
     DriveState,
-    EventType,
     MoodState,
     Perception,
 )
@@ -94,8 +93,9 @@ async def form_moment(
     if _is_duplicate(perception.content, recent_contents, threshold=dedup_similarity):
         return None
 
-    # Compute valence
+    # Compute valence — dual perspective (self + other)
     valence = compute_valence(perception.content, mood)
+    other_valence = compute_other_valence(perception.content)
 
     # Snapshot drives at this moment
     drive_snapshot = {
@@ -113,6 +113,7 @@ async def form_moment(
         valence=valence,
         drive_snapshot=drive_snapshot,
         timestamp=perception.timestamp or _clock.now(),
+        other_valence=other_valence,
         metadata=perception.metadata,
     )
 

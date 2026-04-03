@@ -53,11 +53,12 @@ class DayMoment:
     content: str
     event_type: EventType
     salience: float  # 0-1, computed deterministically
-    valence: float  # -1 to 1
+    valence: float  # -1 to 1, agent's operative emotion
     drive_snapshot: dict[str, float]  # drive levels at time of moment
     timestamp: datetime
     processed: bool = False  # marked True after consolidation
     nap_processed: bool = False  # marked True after nap processes it
+    other_valence: float = 0.0  # -1 to 1, inferred other-speaker emotion
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -134,6 +135,7 @@ class RecallContext:
     reflections: list[str] = field(default_factory=list)
     thread_context: list[str] = field(default_factory=list)
     cold_echoes: list[str] = field(default_factory=list)
+    visual: list = field(default_factory=list)  # list[VisualMatch] from visual sources
     totem_facts: list[str] = field(default_factory=list)
     trait_facts: list[str] = field(default_factory=list)
     extra_context: list[str] = field(default_factory=list)
@@ -193,6 +195,21 @@ class RecallContext:
             if items:
                 body = "\n".join(f"- {item}" for item in items)
                 sections.append(f"### {title}\n{body}")
+        # Visual matches (VisualMatch objects with filepath, score, metadata)
+        if self.visual:
+            lines: list[str] = []
+            for match in self.visual:
+                meta = getattr(match, "metadata", {})
+                parts = [getattr(match, "filepath", str(match))]
+                if meta.get("chapter_num") is not None:
+                    parts.append(f"ch.{meta['chapter_num']}")
+                if meta.get("page_num") is not None:
+                    parts.append(f"p.{meta['page_num']}")
+                score = getattr(match, "score", None)
+                if score is not None:
+                    parts.append(f"score={score:.2f}")
+                lines.append(f"- {' | '.join(parts)}")
+            sections.append("### Visual References\n" + "\n".join(lines))
         if not sections:
             return ""
         return "## Relevant Context\n\n" + "\n\n".join(sections)
@@ -267,6 +284,7 @@ class MoodState:
     valence: float = 0.0  # -1 to 1
     arousal: float = 0.5  # 0 to 1
     word: str = "neutral"
+    is_desperate: bool = False  # high-arousal + low-valence safety flag
 
 
 @dataclass
