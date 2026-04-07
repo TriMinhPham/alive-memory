@@ -125,6 +125,10 @@ async def recall(
                 _seen.add(content)
                 _merge_cold_hit(hit, ctx, content)
                 ctx.total_hits += 1
+                # Track retrieved session IDs for R@k measurement
+                sid = hit.get("session_id")
+                if sid and sid not in ctx.retrieved_session_ids:
+                    ctx.retrieved_session_ids.append(sid)
         except Exception:
             logger.debug("Semantic cold search failed", exc_info=True)
 

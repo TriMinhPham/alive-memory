@@ -215,12 +215,27 @@ async def _bench_worker_async(
                     predictions[query.query_id] = answer
                     all_gt.update(gt_raw)
 
+                    # Grab retrieved session IDs for R@k
+                    retrieved_sids = getattr(system, "_last_retrieved_session_ids", [])
+                    gt_entry = gt_raw.get(query.query_id, {})
+                    answer_sids = set(gt_entry.get("evidence", []))
+                    # Compute R@k
+                    recall_at_5 = float(any(
+                        sid in answer_sids for sid in retrieved_sids[:5]
+                    )) if answer_sids else None
+                    recall_at_10 = float(any(
+                        sid in answer_sids for sid in retrieved_sids[:10]
+                    )) if answer_sids else None
+
                     # Write result line to JSONL
                     result_line = {
                         "instance_id": inst_id,
                         "query_id": query.query_id,
                         "prediction": answer,
-                        "ground_truth": gt_raw.get(query.query_id, {}),
+                        "ground_truth": gt_entry,
+                        "retrieved_session_ids": retrieved_sids,
+                        "recall_at_5": recall_at_5,
+                        "recall_at_10": recall_at_10,
                         "query_latency_ms": latency_ms,
                         "worker_id": worker_id,
                         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -413,8 +428,10 @@ async def main_bench(args) -> None:
     agg = _aggregate(eval_results)
     by_cat = _aggregate_by_category(eval_results)
 
-    # Compute latency stats from JSONL
+    # Compute latency + retrieval recall stats from JSONL
     all_latencies: list[float] = []
+    recall_5_scores: list[float] = []
+    recall_10_scores: list[float] = []
     for jsonl_file in run_dir.glob("worker_*.jsonl"):
         with open(jsonl_file) as f:
             for line in f:
@@ -422,6 +439,10 @@ async def main_bench(args) -> None:
                     entry = json.loads(line.strip())
                     if "query_latency_ms" in entry:
                         all_latencies.append(entry["query_latency_ms"])
+                    if entry.get("recall_at_5") is not None:
+                        recall_5_scores.append(entry["recall_at_5"])
+                    if entry.get("recall_at_10") is not None:
+                        recall_10_scores.append(entry["recall_at_10"])
                 except (json.JSONDecodeError, KeyError):
                     continue
     sorted_lat = sorted(all_latencies)
@@ -432,6 +453,11 @@ async def main_bench(args) -> None:
     print(f"{'=' * 50}")
     print(f"  Aggregate: {agg}")
     print(f"  Predictions: {len(predictions)}")
+    if recall_5_scores:
+        r5 = sum(recall_5_scores) / len(recall_5_scores)
+        r10 = sum(recall_10_scores) / len(recall_10_scores) if recall_10_scores else 0
+        print(f"  Retrieval R@5:  {r5:.3f} ({int(sum(recall_5_scores))}/{len(recall_5_scores)})")
+        print(f"  Retrieval R@10: {r10:.3f} ({int(sum(recall_10_scores))}/{len(recall_10_scores)})")
     if sorted_lat:
         print(f"  Query latency (median): {sorted_lat[len(sorted_lat)//2]:.1f}ms")
         print(f"  Query latency (p95):    {sorted_lat[int(len(sorted_lat)*0.95)]:.1f}ms")
@@ -447,6 +473,11 @@ async def main_bench(args) -> None:
         "seed": 42,
         "aggregate_scores": agg,
         "scores_by_category": by_cat,
+        "retrieval_recall": {
+            "R@5": sum(recall_5_scores) / len(recall_5_scores) if recall_5_scores else None,
+            "R@10": sum(recall_10_scores) / len(recall_10_scores) if recall_10_scores else None,
+            "n": len(recall_5_scores),
+        },
         "system_metrics": {
             "total_predictions": len(predictions),
             "median_query_latency_ms": sorted_lat[len(sorted_lat)//2] if sorted_lat else 0,

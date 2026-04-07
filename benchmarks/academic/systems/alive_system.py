@@ -151,6 +151,9 @@ class AliveMemorySystem(MemorySystemAdapter):
         # Recall from alive's three-tier memory
         ctx = await self._memory.recall(query=query.question, limit=10)
 
+        # Stash retrieved session IDs for R@k measurement
+        self._last_retrieved_session_ids = list(ctx.retrieved_session_ids)
+
         # Build context from all tiers
         context_parts: list[str] = []
 
