@@ -31,14 +31,42 @@ _ROLE_TO_EVENT = {
 }
 
 
-def _build_session_context(ctx: RecallContext) -> str:
-    """Regroup retrieved cold hits by session for coherent LLM context.
+def _build_session_context(
+    ctx: RecallContext,
+    backfill_turns: list[dict] | None = None,
+) -> str:
+    """Build coherent session context for LLM answer generation.
 
-    Instead of showing flat disconnected turns, reconstructs conversation
-    sessions so the LLM sees full dialogue flow.
+    If backfill_turns is provided, uses full session turns (all turns
+    from top sessions, not just the ones that matched). Otherwise falls
+    back to regrouping the retrieved cold hits.
     """
-    if not ctx.cold_hits:
-        # Fallback: flat context from legacy buckets
+    # Determine session ranking from cold hits
+    session_best_score: dict[str, float] = {}
+    for hit in ctx.cold_hits:
+        sid = hit.get("session_id") or "unknown"
+        score = hit.get("cosine_score", 0.0)
+        if score > session_best_score.get(sid, 0.0):
+            session_best_score[sid] = score
+
+    if backfill_turns:
+        # Full sessions from backfill — group by session_id
+        sessions: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        for turn in backfill_turns:
+            sid = turn.get("session_id") or "unknown"
+            turn_idx = turn.get("turn_index") or 0
+            content = turn.get("raw_content") or turn.get("content", "")
+            sessions[sid].append((turn_idx, content))
+    elif ctx.cold_hits:
+        # Fallback: regroup retrieved hits only
+        sessions = defaultdict(list)
+        for hit in ctx.cold_hits:
+            sid = hit.get("session_id") or "unknown"
+            turn_idx = hit.get("turn_index") or 0
+            content = hit.get("_content") or hit.get("raw_content") or hit.get("content", "")
+            sessions[sid].append((turn_idx, content))
+    else:
+        # Last resort: flat context
         parts: list[str] = []
         if ctx.journal_entries:
             parts.append("Conversation history:\n" + "\n".join(ctx.journal_entries[:10]))
@@ -48,27 +76,14 @@ def _build_session_context(ctx: RecallContext) -> str:
             parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
         return "\n\n".join(parts)
 
-    # Group hits by session_id, preserving turn order
-    sessions: dict[str, list[tuple[int, str]]] = defaultdict(list)
-    # Track session order by best hit score
-    session_best_score: dict[str, float] = {}
-    for hit in ctx.cold_hits:
-        sid = hit.get("session_id") or "unknown"
-        turn_idx = hit.get("turn_index") or 0
-        content = hit.get("_content") or hit.get("raw_content") or hit.get("content", "")
-        sessions[sid].append((turn_idx, content))
-        score = hit.get("cosine_score", 0.0)
-        if score > session_best_score.get(sid, 0.0):
-            session_best_score[sid] = score
-
-    # Sort sessions by best hit score (most relevant first)
+    # Sort sessions by best retrieval score
     sorted_sessions = sorted(
         sessions.items(),
         key=lambda x: session_best_score.get(x[0], 0.0),
         reverse=True,
     )
 
-    # Build session blocks (top 5 sessions)
+    # Build session blocks (top 5 sessions, full conversation each)
     blocks: list[str] = []
     for sid, turns in sorted_sessions[:5]:
         turns.sort(key=lambda x: x[0])
@@ -79,7 +94,6 @@ def _build_session_context(ctx: RecallContext) -> str:
     if blocks:
         context_parts.append("\n\n".join(blocks))
 
-    # Append structured facts that aren't turn-based
     if ctx.totem_facts:
         context_parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
     if ctx.trait_facts:
@@ -207,14 +221,22 @@ class AliveMemorySystem(MemorySystemAdapter):
         if not self._memory:
             return "[error: memory not initialized]"
 
-        # Recall from alive's three-tier memory (more hits for session regrouping)
+        # Recall from alive's three-tier memory
         ctx = await self._memory.recall(query=query.question, limit=20)
 
         # Stash retrieved session IDs for R@k measurement
         self._last_retrieved_session_ids = list(ctx.retrieved_session_ids)
 
-        # Regroup cold hits by session for coherent context
-        context = _build_session_context(ctx)
+        # Backfill: fetch ALL turns from top retrieved sessions
+        backfill_turns = None
+        top_sids = ctx.retrieved_session_ids[:5]
+        if top_sids and self._memory._storage is not None:
+            try:
+                backfill_turns = await self._memory._storage.get_session_turns(top_sids)
+            except Exception:
+                pass  # fall back to retrieved hits only
+
+        context = _build_session_context(ctx, backfill_turns=backfill_turns)
 
         return await llm_answer(
             question=query.question,

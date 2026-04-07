@@ -746,6 +746,40 @@ class SQLiteStorage(BaseStorage):
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item for _, item in scored[:limit]]
 
+    async def get_session_turns(
+        self,
+        session_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Fetch all cold_memory entries for given session IDs, ordered by turn_index.
+
+        Used to backfill full conversation context after semantic search
+        identifies relevant sessions.
+        """
+        if not session_ids:
+            return []
+        conn = await self._get_db()
+        placeholders = ",".join("?" for _ in session_ids)
+        cursor = await conn.execute(
+            f"SELECT id, content, raw_content, entry_type, session_id, "
+            f"turn_index, role FROM cold_memory "
+            f"WHERE session_id IN ({placeholders}) "
+            f"ORDER BY session_id, turn_index",
+            session_ids,
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "content": row["content"],
+                "raw_content": row["raw_content"],
+                "entry_type": row["entry_type"],
+                "session_id": row["session_id"],
+                "turn_index": row["turn_index"],
+                "role": row["role"],
+            }
+            for row in rows
+        ]
+
     # ── Totems (Semantic Facts) ────────────────────────────────────
 
     async def insert_totem(
