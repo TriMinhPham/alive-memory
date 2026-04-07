@@ -97,11 +97,11 @@ def _build_session_context(
         reverse=True,
     )
 
-    # Build session blocks (top 3 sessions — focused but complete)
+    # Build session blocks — top 3 sessions, max 8 turns each to cut noise
     blocks: list[str] = []
     for sid, turns in sorted_sessions[:3]:
         turns.sort(key=lambda x: x[0])
-        turn_lines = [content for _, content in turns]
+        turn_lines = [content for _, content in turns[:8]]
         date_str = session_dates.get(sid, "")
         header = f"Session (date: {date_str}):" if date_str else f"Session {sid}:"
         blocks.append(header + "\n" + "\n".join(turn_lines))
@@ -242,8 +242,8 @@ class AliveMemorySystem(MemorySystemAdapter):
         if not self._memory:
             return "[error: memory not initialized]"
 
-        # Recall from alive's three-tier memory
-        ctx = await self._memory.recall(query=query.question, limit=20)
+        # Recall from alive's three-tier memory (focused — fewer turns, less noise)
+        ctx = await self._memory.recall(query=query.question, limit=12)
 
         # Stash retrieved session IDs for R@k measurement
         self._last_retrieved_session_ids = list(ctx.retrieved_session_ids)

@@ -68,12 +68,14 @@ async def llm_answer(
             f"The relevant conversation sessions are provided below.\n\n"
             f"{context}\n\n"
             f"Question: {question}\n\n"
-            f"First reason through the conversations to find the answer. "
-            f"Then give your final answer after \"ANSWER: \" on its own line.\n"
-            f"The ANSWER line must be ONLY the specific fact — a name, date, "
-            f"place, number, or short phrase. No explanation.\n"
-            f"If the conversations contain no relevant information, write: "
-            f"ANSWER: I don't know"
+            f"Instructions:\n"
+            f"1. Search the conversations for the answer.\n"
+            f"2. If the same fact was updated across sessions, use the MOST RECENT value "
+            f"(check the session dates).\n"
+            f"3. If NONE of the conversations discuss the topic asked about, "
+            f"write ANSWER: I don't know\n"
+            f"4. Write your final answer after \"ANSWER: \" — ONLY the specific fact "
+            f"(a name, date, place, number, or short phrase). No explanation on the ANSWER line."
         )
     else:
         prompt = (
