@@ -248,18 +248,10 @@ class AliveMemorySystem(MemorySystemAdapter):
         # Stash retrieved session IDs for R@k measurement
         self._last_retrieved_session_ids = list(ctx.retrieved_session_ids)
 
-        # Backfill: fetch ALL turns from top retrieved sessions
-        backfill_turns = None
-        top_sids = ctx.retrieved_session_ids[:3]
-        if top_sids and self._memory._storage is not None:
-            try:
-                backfill_turns = await self._memory._storage.get_session_turns(top_sids)
-            except Exception:
-                pass  # fall back to retrieved hits only
-
+        # No backfill — matching turns only. Full sessions dilute context.
         context = _build_session_context(
             ctx,
-            backfill_turns=backfill_turns,
+            backfill_turns=None,
             session_date_map=session_date_map,
         )
 
