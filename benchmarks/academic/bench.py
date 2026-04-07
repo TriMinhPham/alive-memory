@@ -205,7 +205,10 @@ async def _bench_worker_async(
                 for query in queries:
                     t0 = time.perf_counter()
                     try:
-                        answer = await system.answer_query(query, llm_config)
+                        answer = await system.answer_query(
+                            query, llm_config,
+                            session_date_map=config.get("session_date_map"),
+                        )
                     except Exception as e:
                         answer = f"[error: {e}]"
                         errors.append(f"instance {inst_id} query {query.query_id}: {e}")
@@ -286,6 +289,30 @@ async def _bench_worker_async(
 # Main
 # ---------------------------------------------------------------------------
 
+def _build_session_date_map(data_dir: str, benchmark: str) -> dict[str, str]:
+    """Build session_id → date lookup from raw dataset.
+
+    Avoids re-prepare by reading dates directly from the dataset file.
+    """
+    if benchmark != "longmemeval":
+        return {}
+    data_file = Path(data_dir) / "longmemeval" / "longmemeval_s_cleaned.json"
+    if not data_file.exists():
+        return {}
+    raw = json.loads(data_file.read_text())
+    date_map: dict[str, str] = {}
+    for item in raw:
+        for sid, date in zip(
+            item.get("haystack_session_ids", []),
+            item.get("haystack_dates", []),
+            strict=False,
+        ):
+            if sid and date and sid not in date_map:
+                date_map[sid] = date
+    print(f"  Loaded {len(date_map)} session dates from dataset", flush=True)
+    return date_map
+
+
 async def main_bench(args) -> None:
     """CLI entry point for bench command."""
     prepared_dir = Path(args.prepared_dir)
@@ -338,6 +365,9 @@ async def main_bench(args) -> None:
             print(f"Resuming: {len(skip_ids)} instances already answered", flush=True)
             instance_specs = [s for s in instance_specs if s["instance_id"] not in skip_ids]
 
+    # Build session date map from raw dataset (avoids re-prepare)
+    session_date_map = _build_session_date_map(args.data_dir, args.benchmark)
+
     if not instance_specs:
         print("All instances already answered. Running evaluation only.")
     else:
@@ -345,7 +375,7 @@ async def main_bench(args) -> None:
         w = min(args.workers, n)
 
         # Build config
-        config: dict = {"seed": 42}
+        config: dict = {"seed": 42, "session_date_map": session_date_map}
         llm_config: dict = {}
         if args.llm_model:
             config["llm_model"] = args.llm_model

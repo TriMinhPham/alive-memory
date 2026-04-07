@@ -34,12 +34,16 @@ _ROLE_TO_EVENT = {
 def _build_session_context(
     ctx: RecallContext,
     backfill_turns: list[dict] | None = None,
+    session_date_map: dict[str, str] | None = None,
 ) -> str:
     """Build coherent session context for LLM answer generation.
 
     If backfill_turns is provided, uses full session turns (all turns
     from top sessions, not just the ones that matched). Otherwise falls
     back to regrouping the retrieved cold hits.
+
+    session_date_map: external session_id→date lookup from raw dataset,
+    avoids needing dates in cold_memory (no re-prepare required).
     """
     # Determine session ranking from cold hits
     session_best_score: dict[str, float] = {}
@@ -49,8 +53,8 @@ def _build_session_context(
         if score > session_best_score.get(sid, 0.0):
             session_best_score[sid] = score
 
-    # Track session dates from backfill metadata
-    session_dates: dict[str, str] = {}
+    # Session dates: prefer external map, fall back to cold_memory metadata
+    session_dates: dict[str, str] = dict(session_date_map) if session_date_map else {}
 
     if backfill_turns:
         # Full sessions from backfill — group by session_id
@@ -229,7 +233,12 @@ class AliveMemorySystem(MemorySystemAdapter):
         if self._memory:
             await self._memory.consolidate(depth="full")
 
-    async def answer_query(self, query: MemoryQuery, llm_config: dict) -> str:
+    async def answer_query(
+        self,
+        query: MemoryQuery,
+        llm_config: dict,
+        session_date_map: dict[str, str] | None = None,
+    ) -> str:
         if not self._memory:
             return "[error: memory not initialized]"
 
@@ -248,7 +257,11 @@ class AliveMemorySystem(MemorySystemAdapter):
             except Exception:
                 pass  # fall back to retrieved hits only
 
-        context = _build_session_context(ctx, backfill_turns=backfill_turns)
+        context = _build_session_context(
+            ctx,
+            backfill_turns=backfill_turns,
+            session_date_map=session_date_map,
+        )
 
         return await llm_answer(
             question=query.question,
