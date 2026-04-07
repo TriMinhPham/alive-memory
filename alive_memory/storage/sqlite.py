@@ -735,6 +735,8 @@ class SQLiteStorage(BaseStorage):
                         "category": row["category"],
                         "metadata": json.loads(row["metadata"] or "{}"),
                         "session_id": row["session_id"],
+                        "turn_index": row["turn_index"],
+                        "role": row["role"],
                         "score": cosine,
                         "cosine_score": cosine,
                     },

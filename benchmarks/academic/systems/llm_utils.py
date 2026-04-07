@@ -48,16 +48,20 @@ async def llm_answer(
 
     if context:
         prompt = (
-            f"Based on the following conversation history, answer the question.\n\n"
-            f"Conversation history:\n{context}\n\n"
+            f"You are answering questions about a user's past conversations. "
+            f"The relevant conversation sessions are provided below.\n\n"
+            f"{context}\n\n"
             f"Question: {question}\n\n"
-            f"Answer concisely. If the information is not in the history, "
-            f"say 'I don't know'."
+            f"Answer the question based on the conversations above. "
+            f"Be specific — include names, dates, and details from the text. "
+            f"Answer concisely in 1-2 sentences. "
+            f"Only say 'I don't know' if the conversations contain absolutely "
+            f"no relevant information."
         )
     else:
         prompt = (
-            f"Answer the following question. If you don't have enough "
-            f"information, say 'I don't know'.\n\n"
+            f"Answer the following question based on your knowledge. "
+            f"If you truly cannot answer, say 'I don't know'.\n\n"
             f"Question: {question}"
         )
 

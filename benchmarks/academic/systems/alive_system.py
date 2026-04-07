@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections import defaultdict
 
 from alive_memory import AliveMemory, EventType
+from alive_memory.types import RecallContext
 from benchmarks.academic.harness.base import (
     ConversationTurn,
     MemoryQuery,
@@ -27,6 +29,63 @@ _ROLE_TO_EVENT = {
     "observation": EventType.OBSERVATION,
     "action": EventType.ACTION,
 }
+
+
+def _build_session_context(ctx: RecallContext) -> str:
+    """Regroup retrieved cold hits by session for coherent LLM context.
+
+    Instead of showing flat disconnected turns, reconstructs conversation
+    sessions so the LLM sees full dialogue flow.
+    """
+    if not ctx.cold_hits:
+        # Fallback: flat context from legacy buckets
+        parts: list[str] = []
+        if ctx.journal_entries:
+            parts.append("Conversation history:\n" + "\n".join(ctx.journal_entries[:10]))
+        if ctx.totem_facts:
+            parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
+        if ctx.trait_facts:
+            parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
+        return "\n\n".join(parts)
+
+    # Group hits by session_id, preserving turn order
+    sessions: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    # Track session order by best hit score
+    session_best_score: dict[str, float] = {}
+    for hit in ctx.cold_hits:
+        sid = hit.get("session_id") or "unknown"
+        turn_idx = hit.get("turn_index") or 0
+        content = hit.get("_content") or hit.get("raw_content") or hit.get("content", "")
+        sessions[sid].append((turn_idx, content))
+        score = hit.get("cosine_score", 0.0)
+        if score > session_best_score.get(sid, 0.0):
+            session_best_score[sid] = score
+
+    # Sort sessions by best hit score (most relevant first)
+    sorted_sessions = sorted(
+        sessions.items(),
+        key=lambda x: session_best_score.get(x[0], 0.0),
+        reverse=True,
+    )
+
+    # Build session blocks (top 5 sessions)
+    blocks: list[str] = []
+    for sid, turns in sorted_sessions[:5]:
+        turns.sort(key=lambda x: x[0])
+        turn_lines = [content for _, content in turns]
+        blocks.append(f"Session {sid}:\n" + "\n".join(turn_lines))
+
+    context_parts: list[str] = []
+    if blocks:
+        context_parts.append("\n\n".join(blocks))
+
+    # Append structured facts that aren't turn-based
+    if ctx.totem_facts:
+        context_parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
+    if ctx.trait_facts:
+        context_parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
+
+    return "\n\n".join(context_parts)
 
 
 class AliveMemorySystem(MemorySystemAdapter):
@@ -148,31 +207,14 @@ class AliveMemorySystem(MemorySystemAdapter):
         if not self._memory:
             return "[error: memory not initialized]"
 
-        # Recall from alive's three-tier memory
-        ctx = await self._memory.recall(query=query.question, limit=10)
+        # Recall from alive's three-tier memory (more hits for session regrouping)
+        ctx = await self._memory.recall(query=query.question, limit=20)
 
         # Stash retrieved session IDs for R@k measurement
         self._last_retrieved_session_ids = list(ctx.retrieved_session_ids)
 
-        # Build context from all tiers
-        context_parts: list[str] = []
-
-        if ctx.journal_entries:
-            context_parts.append("Journal entries:\n" + "\n".join(ctx.journal_entries[:5]))
-        if ctx.visitor_notes:
-            context_parts.append("Visitor notes:\n" + "\n".join(ctx.visitor_notes[:3]))
-        if ctx.self_knowledge:
-            context_parts.append("Self-knowledge:\n" + "\n".join(ctx.self_knowledge[:3]))
-        if hasattr(ctx, "reflections") and ctx.reflections:
-            context_parts.append("Reflections:\n" + "\n".join(ctx.reflections[:3]))
-        if ctx.totem_facts:
-            context_parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
-        if ctx.trait_facts:
-            context_parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
-        if hasattr(ctx, "cold_echoes") and ctx.cold_echoes:
-            context_parts.append("Historical echoes:\n" + "\n".join(ctx.cold_echoes[:3]))
-
-        context = "\n\n".join(context_parts)
+        # Regroup cold hits by session for coherent context
+        context = _build_session_context(ctx)
 
         return await llm_answer(
             question=query.question,

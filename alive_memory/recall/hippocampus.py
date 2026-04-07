@@ -125,6 +125,8 @@ async def recall(
                 _seen.add(content)
                 _merge_cold_hit(hit, ctx, content)
                 ctx.total_hits += 1
+                # Store full hit for session regrouping
+                ctx.cold_hits.append({**hit, "_content": content})
                 # Track retrieved session IDs for R@k measurement
                 sid = hit.get("session_id")
                 if sid and sid not in ctx.retrieved_session_ids:
