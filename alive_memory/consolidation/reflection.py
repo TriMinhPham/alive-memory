@@ -206,11 +206,19 @@ async def reflect_on_batch(
         '1. "reflection": A brief summary (3-6 sentences) covering the key themes '
         "and notable information across all moments.\n\n"
         '2. "totems": Array of facts about the VISITOR (user) across ALL moments. Each has:\n'
-        '   - "entity", "weight" (0-1), "context", "category"\n'
+        '   - "entity": the fact (string, be specific)\n'
+        '   - "weight": importance 0.0-1.0\n'
+        '   - "context": brief context explaining relevance\n'
+        '   - "category": one of "personal", "preference", "relationship", '
+        '"location", "event", "general"\n'
         '   Only extract facts the visitor stated about themselves.\n'
         '   Do NOT extract recommendations or information provided by the assistant.\n\n'
         '3. "traits": Array of observations about the visitor across ALL moments. Each has:\n'
-        '   - "trait_category", "trait_key", "trait_value", "confidence" (0-1)\n\n'
+        '   - "trait_category": one of "personal", "preference", "demographic", '
+        '"relationship", "behavioral", "emotional"\n'
+        '   - "trait_key": specific attribute name\n'
+        '   - "trait_value": the observed value\n'
+        '   - "confidence": 0.0-1.0\n\n'
         f"{categories_text}\n"
         "Extract facts stated by the visitor — skip assistant-generated content.\n"
         "If no facts are found, use empty arrays.\n\n"

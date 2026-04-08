@@ -210,26 +210,9 @@ async def consolidate(
     high_threshold = float(cfg.get("consolidation.high_salience_threshold", 0.50))
     med_threshold = float(cfg.get("consolidation.med_salience_threshold", 0.40))
     med_batch_size = int(cfg.get("consolidation.med_batch_size", 8))
-
-    # Partition moments into tiers
-    high_moments: list[DayMoment] = []
-    med_moments: list[DayMoment] = []
-    low_moments: list[DayMoment] = []
-    for moment in moments:
-        if moment.salience >= high_threshold:
-            high_moments.append(moment)
-        elif moment.salience >= med_threshold:
-            med_moments.append(moment)
-        else:
-            low_moments.append(moment)
-
-    logger.info(
-        "Consolidation tiers: %d high, %d medium, %d low (of %d total)",
-        len(high_moments), len(med_moments), len(low_moments), len(moments),
-    )
+    group_by_session = bool(cfg.get("consolidation.group_by_session", False))
 
     # Step 2a: Cold search for ALL moments (needed for cold archive embedding)
-    # Cache echoes per-moment so high-tier reflection can use them.
     moment_cold_echoes: dict[str, list[dict]] = {}
     for moment in moments:
         if not is_nap and embedder:
@@ -243,79 +226,137 @@ async def consolidate(
             all_cold_echoes.extend(cold_echoes)
             report.cold_echoes_found += len(cold_echoes)
 
-    # Step 2b: High salience — individual LLM reflection (full detail)
-    for moment in high_moments:
-        if llm and writer and reader:
-            result = await reflect_on_moment(
-                moment,
-                reader=reader,
-                storage=storage,
-                llm=llm,
-                cold_echoes=moment_cold_echoes.get(moment.id),
-                config=cfg,
-                existing_categories=existing_categories,
-            )
-            await _apply_reflection(
-                moment, result, writer, storage, trait_cache,
-                existing_categories, report,
-            )
-        elif writer:
-            writer.append_journal(moment.content, date=moment.timestamp, moment_id=moment.id)
-            report.journal_entries_written += 1
+    # ── Session-grouped path: batch by session_id ─────────────────
+    if group_by_session:
+        from collections import OrderedDict
+        session_groups: dict[str, list[DayMoment]] = OrderedDict()
+        for moment in moments:
+            sid = moment.metadata.get("session_id", "unknown")
+            session_groups.setdefault(sid, []).append(moment)
 
-        await storage.mark_moment_processed(moment.id, nap=is_nap)
-        report.moments_processed += 1
+        logger.info(
+            "Session-grouped consolidation: %d sessions, %d moments",
+            len(session_groups), len(moments),
+        )
 
-    # Step 2c: Medium salience — batched reflection (small groups)
-    # Always write raw content to journal so recall can find it.
-    for i in range(0, len(med_moments), med_batch_size):
-        batch = med_moments[i:i + med_batch_size]
-        if writer:
+        for sid, session_moments in session_groups.items():
+            # Write raw content to journal
+            if writer:
+                for moment in session_moments:
+                    writer.append_journal(
+                        moment.content, date=moment.timestamp, moment_id=moment.id,
+                    )
+                    report.journal_entries_written += 1
+
+            # One batch reflection per session
+            if llm and writer and reader:
+                result = await reflect_on_batch(
+                    session_moments,
+                    reader=reader,
+                    storage=storage,
+                    llm=llm,
+                    config=cfg,
+                    existing_categories=existing_categories,
+                )
+                await _apply_batch_reflection(
+                    session_moments, result, writer, storage, trait_cache,
+                    existing_categories, report,
+                )
+
+            for moment in session_moments:
+                await storage.mark_moment_processed(moment.id, nap=is_nap)
+                report.moments_processed += 1
+
+    # ── Default path: salience-tiered reflection ──────────────────
+    else:
+        # Partition moments into tiers
+        high_moments: list[DayMoment] = []
+        med_moments: list[DayMoment] = []
+        low_moments: list[DayMoment] = []
+        for moment in moments:
+            if moment.salience >= high_threshold:
+                high_moments.append(moment)
+            elif moment.salience >= med_threshold:
+                med_moments.append(moment)
+            else:
+                low_moments.append(moment)
+
+        logger.info(
+            "Consolidation tiers: %d high, %d medium, %d low (of %d total)",
+            len(high_moments), len(med_moments), len(low_moments), len(moments),
+        )
+
+        # Step 2b: High salience — individual LLM reflection (full detail)
+        for moment in high_moments:
+            if llm and writer and reader:
+                result = await reflect_on_moment(
+                    moment,
+                    reader=reader,
+                    storage=storage,
+                    llm=llm,
+                    cold_echoes=moment_cold_echoes.get(moment.id),
+                    config=cfg,
+                    existing_categories=existing_categories,
+                )
+                await _apply_reflection(
+                    moment, result, writer, storage, trait_cache,
+                    existing_categories, report,
+                )
+            elif writer:
+                writer.append_journal(moment.content, date=moment.timestamp, moment_id=moment.id)
+                report.journal_entries_written += 1
+
+            await storage.mark_moment_processed(moment.id, nap=is_nap)
+            report.moments_processed += 1
+
+        # Step 2c: Medium salience — batched reflection (small groups)
+        for i in range(0, len(med_moments), med_batch_size):
+            batch = med_moments[i:i + med_batch_size]
+            if writer:
+                for moment in batch:
+                    writer.append_journal(moment.content, date=moment.timestamp, moment_id=moment.id)
+                    report.journal_entries_written += 1
+            if llm and writer and reader:
+                result = await reflect_on_batch(
+                    batch,
+                    reader=reader,
+                    storage=storage,
+                    llm=llm,
+                    config=cfg,
+                    existing_categories=existing_categories,
+                )
+                await _apply_batch_reflection(
+                    batch, result, writer, storage, trait_cache,
+                    existing_categories, report,
+                )
+
             for moment in batch:
-                writer.append_journal(moment.content, date=moment.timestamp, moment_id=moment.id)
-                report.journal_entries_written += 1
-        if llm and writer and reader:
-            result = await reflect_on_batch(
-                batch,
-                reader=reader,
-                storage=storage,
-                llm=llm,
-                config=cfg,
-                existing_categories=existing_categories,
-            )
-            await _apply_batch_reflection(
-                batch, result, writer, storage, trait_cache,
-                existing_categories, report,
-            )
+                await storage.mark_moment_processed(moment.id, nap=is_nap)
+                report.moments_processed += 1
 
-        for moment in batch:
-            await storage.mark_moment_processed(moment.id, nap=is_nap)
-            report.moments_processed += 1
+        # Step 2d: Low salience — one big batch (minimal LLM cost)
+        if low_moments:
+            if writer:
+                for moment in low_moments:
+                    writer.append_journal(moment.content, date=moment.timestamp, moment_id=moment.id)
+                    report.journal_entries_written += 1
+            if llm and writer and reader:
+                result = await reflect_on_batch(
+                    low_moments,
+                    reader=reader,
+                    storage=storage,
+                    llm=llm,
+                    config=cfg,
+                    existing_categories=existing_categories,
+                )
+                await _apply_batch_reflection(
+                    low_moments, result, writer, storage, trait_cache,
+                    existing_categories, report,
+                )
 
-    # Step 2d: Low salience — one big batch (minimal LLM cost)
-    # Always write raw content to journal so recall can find it.
-    if low_moments:
-        if writer:
             for moment in low_moments:
-                writer.append_journal(moment.content, date=moment.timestamp, moment_id=moment.id)
-                report.journal_entries_written += 1
-        if llm and writer and reader:
-            result = await reflect_on_batch(
-                low_moments,
-                reader=reader,
-                storage=storage,
-                llm=llm,
-                config=cfg,
-                existing_categories=existing_categories,
-            )
-            await _apply_batch_reflection(
-                low_moments, result, writer, storage, trait_cache,
-                existing_categories, report,
-            )
-
-        for moment in low_moments:
-            await storage.mark_moment_processed(moment.id, nap=is_nap)
-            report.moments_processed += 1
+                await storage.mark_moment_processed(moment.id, nap=is_nap)
+                report.moments_processed += 1
 
     # Upsert visitors (full only — nap moments are re-processed during full sleep,
     # so upserting during nap would double-count the visit)
