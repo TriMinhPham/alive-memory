@@ -23,8 +23,11 @@ from benchmarks.academic.systems.llm_utils import LLMTracker, llm_answer
 _ROLE_TO_EVENT = {
     "user": EventType.CONVERSATION,
     "human": EventType.CONVERSATION,
-    "assistant": EventType.CONVERSATION,
-    "ai": EventType.CONVERSATION,
+    # Assistant turns are things WE said — treat as observations, not visitor input.
+    # This prevents consolidation from extracting "facts" from our own responses
+    # (e.g., yoga mat recommendations, BBQ recipes) as if the visitor stated them.
+    "assistant": EventType.OBSERVATION,
+    "ai": EventType.OBSERVATION,
     "system": EventType.SYSTEM,
     "observation": EventType.OBSERVATION,
     "action": EventType.ACTION,
@@ -167,14 +170,15 @@ class AliveMemorySystem(MemorySystemAdapter):
 
         for turn in turns:
             event_type = _ROLE_TO_EVENT.get(turn.role, EventType.CONVERSATION)
-            # Pass the speaker so consolidation can attribute facts correctly.
-            # The content already includes "Speaker: text" so the LLM can
-            # distinguish who said what — visitor_name just sets the default.
-            speaker = (turn.metadata or {}).get("speaker", "")
+            # Only attribute visitor_name to user turns — assistant turns are
+            # things WE said, not visitor input.
+            is_visitor = turn.role in ("user", "human")
+            speaker = (turn.metadata or {}).get("speaker", "") if is_visitor else ""
             metadata = {
                 "session_id": turn.session_id,
                 "turn_id": turn.turn_id,
                 "visitor_name": speaker,
+                "role": turn.role,
             }
             if turn.timestamp:
                 metadata["timestamp"] = turn.timestamp
