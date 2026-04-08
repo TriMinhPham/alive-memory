@@ -99,20 +99,22 @@ async def reflect_on_moment(
         "Process this moment. Return a JSON object with these fields:\n\n"
         '1. "reflection": A brief journal-style reflection (2-4 sentences). '
         "Focus on significance, feelings, and connections.\n\n"
-        '2. "totems": An array of facts, entities, or concepts mentioned. Each has:\n'
-        '   - "entity": the fact or thing (string, be specific)\n'
+        '2. "totems": An array of facts about the VISITOR (user). Each has:\n'
+        '   - "entity": the fact or thing the visitor stated (string, be specific)\n'
         '   - "weight": importance 0.0-1.0\n'
-        '   - "context": brief context explaining relevance\n'
+        '   - "context": brief context explaining relevance to the visitor\n'
         '   - "category": one of "personal", "preference", "relationship", '
-        '"location", "event", "general"\n\n'
-        '3. "traits": An array of observations about people mentioned. Each has:\n'
+        '"location", "event", "general"\n'
+        '   IMPORTANT: Only extract facts the VISITOR stated about themselves.\n'
+        '   Do NOT extract recommendations, information, or suggestions you (the assistant) provided.\n\n'
+        '3. "traits": An array of observations about the visitor. Each has:\n'
         '   - "trait_category": one of "personal", "preference", "demographic", '
         '"relationship", "behavioral", "emotional"\n'
         '   - "trait_key": specific attribute name (e.g. "gender_identity", "favorite_food")\n'
         '   - "trait_value": the observed value\n'
         '   - "confidence": 0.0-1.0\n\n'
         f"{categories_text}"
-        "Only extract facts clearly stated in the text. Do not infer.\n"
+        "Only extract facts clearly stated by the visitor. Do not infer.\n"
         "If no facts are found, use empty arrays.\n\n"
         f"The moment: {moment.content}\n"
         f"Event type: {moment.event_type.value}\n"
@@ -128,8 +130,11 @@ async def reflect_on_moment(
         response = await llm.complete(
             prompt,
             system=(
-                "You are a reflective mind processing experiences. "
-                "You write journal reflections and extract structured facts. "
+                "You are an AI assistant reflecting on a conversation you had. "
+                "Lines starting with [assistant] are things YOU said. "
+                "Lines starting with [user] or [human] are things the VISITOR said. "
+                "Extract facts about the visitor from what THEY said, "
+                "not from your own recommendations or information you provided. "
                 "Return only valid JSON."
             ),
             max_tokens=600,
@@ -200,12 +205,14 @@ async def reflect_on_batch(
         f"Process these {len(moments)} moments as a batch. Return a JSON object:\n\n"
         '1. "reflection": A brief summary (3-6 sentences) covering the key themes '
         "and notable information across all moments.\n\n"
-        '2. "totems": Array of facts/entities mentioned across ALL moments. Each has:\n'
-        '   - "entity", "weight" (0-1), "context", "category"\n\n'
-        '3. "traits": Array of observations about people across ALL moments. Each has:\n'
+        '2. "totems": Array of facts about the VISITOR (user) across ALL moments. Each has:\n'
+        '   - "entity", "weight" (0-1), "context", "category"\n'
+        '   Only extract facts the visitor stated about themselves.\n'
+        '   Do NOT extract recommendations or information provided by the assistant.\n\n'
+        '3. "traits": Array of observations about the visitor across ALL moments. Each has:\n'
         '   - "trait_category", "trait_key", "trait_value", "confidence" (0-1)\n\n'
         f"{categories_text}\n"
-        "Extract ALL facts from ALL moments — don't skip any concrete information.\n"
+        "Extract facts stated by the visitor — skip assistant-generated content.\n"
         "If no facts are found, use empty arrays.\n\n"
         f"Current mood: {state.mood.word}\n\n"
         f"Moments:\n{batch_text}\n\n"
@@ -216,8 +223,12 @@ async def reflect_on_batch(
         response = await llm.complete(
             prompt,
             system=(
-                "You are a reflective mind processing experiences in batch. "
-                "Extract all facts and observations. Return only valid JSON."
+                "You are an AI assistant reflecting on conversations you had. "
+                "Lines starting with [assistant] are things YOU said. "
+                "Lines starting with [user] or [human] are things the VISITOR said. "
+                "Extract facts about the visitor from what THEY said, "
+                "not from your own recommendations or information you provided. "
+                "Return only valid JSON."
             ),
             max_tokens=min(1200, 200 + len(moments) * 100),
             temperature=0.5,
