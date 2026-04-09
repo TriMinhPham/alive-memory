@@ -90,7 +90,7 @@ class _CallableLLM:
         return LLMResponse(text=str(result))
 
 
-def _resolve_llm(llm) -> LLMProvider | None:
+def _resolve_llm(llm, *, model: str | None = None) -> LLMProvider | None:
     """Resolve an LLM provider from a string shorthand, callable, or pass through."""
     if llm is None or isinstance(llm, LLMProvider):
         return llm
@@ -99,22 +99,25 @@ def _resolve_llm(llm) -> LLMProvider | None:
     if not isinstance(llm, str):
         return llm  # type: ignore[return-value,no-any-return]  # duck-typed provider
     name = llm.lower()
+    kwargs: dict[str, Any] = {}
+    if model:
+        kwargs["model"] = model
     if name == "anthropic":
         from alive_memory.llm.anthropic import AnthropicProvider
 
-        return AnthropicProvider()
+        return AnthropicProvider(**kwargs)
     if name == "openai":
         from alive_memory.llm.openai import OpenAIProvider
 
-        return OpenAIProvider()
+        return OpenAIProvider(**kwargs)
     if name == "openrouter":
         from alive_memory.llm.openrouter import OpenRouterProvider
 
-        return OpenRouterProvider()
+        return OpenRouterProvider(**kwargs)
     if name == "gemini":
         from alive_memory.llm.gemini import GeminiProvider
 
-        return GeminiProvider()
+        return GeminiProvider(**kwargs)
     raise ValueError(
         f"Unknown LLM provider {llm!r}. Use 'anthropic', 'openai', "
         f"'openrouter', 'gemini', or pass a callable/LLMProvider."
@@ -182,6 +185,7 @@ class AliveMemory:
         memory_dir: str | Path | None = None,
         config: AliveConfig | dict | str | None = None,
         llm: LLMProvider | str | None = None,
+        llm_model: str | None = None,
         embedder: EmbeddingProvider | str | None = None,
         clock: Clock | None = None,
         visual_sources: list | None = None,
@@ -225,7 +229,7 @@ class AliveMemory:
             self._config = AliveConfig()
 
         # LLM
-        self._llm = _resolve_llm(llm)
+        self._llm = _resolve_llm(llm, model=llm_model)
 
         # Embedder (default to local hash-based)
         self._embedder = _resolve_embedder(
