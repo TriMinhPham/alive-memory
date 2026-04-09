@@ -29,7 +29,6 @@ from benchmarks.academic.harness.scoring import (
     abstention_score,
     exact_match,
     llm_judge,
-    numeric_match,
     substring_match,
     token_f1,
 )
@@ -253,12 +252,10 @@ class LongMemEvalDataset(DatasetAdapter):
                 scores["f1"] = f1_scores["f1"]
                 scores["exact_match"] = exact_match(pred, gt.answer)
                 scores["substring_hit"] = substring_match(pred, [gt.answer])
-                scores["numeric_match"] = numeric_match(pred, gt.answer)
 
                 scores["accuracy"] = max(
                     scores["exact_match"],
                     scores["substring_hit"],
-                    scores["numeric_match"],
                     1.0 if scores["f1"] > 0.5 else 0.0,
                 )
 
