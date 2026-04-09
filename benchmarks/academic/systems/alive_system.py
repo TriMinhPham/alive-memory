@@ -31,6 +31,55 @@ _ROLE_TO_EVENT = {
 }
 
 
+async def _expand_query(question: str, llm_config: dict) -> str:
+    """Generate a few related search terms to bridge semantic gaps.
+
+    Returns a short string of additional keywords, or "" on failure.
+    Lightweight: one small LLM call with max_tokens=60.
+    """
+    import os
+
+    try:
+        import httpx
+    except ImportError:
+        return ""
+
+    api_key = llm_config.get("api_key", os.environ.get(
+        "OPENAI_API_KEY", os.environ.get("OPENROUTER_API_KEY", ""),
+    ))
+    model = llm_config.get("model", "gpt-4o-mini")
+    base_url = llm_config.get("base_url", "https://api.openai.com/v1")
+
+    prompt = (
+        f"Given this question about someone's past conversations, list 3-5 "
+        f"related keywords or synonyms that might appear in the conversations "
+        f"instead of the exact words used in the question. "
+        f"Output ONLY the keywords separated by spaces, nothing else.\n\n"
+        f"Question: {question}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 60,
+                    "temperature": 0,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"].strip()
+    except Exception:
+        return ""
+
+
 def _build_session_context(
     ctx: RecallContext,
     backfill_turns: list[dict] | None = None,
@@ -240,6 +289,10 @@ class AliveMemorySystem(MemorySystemAdapter):
         if self._memory:
             await self._memory.consolidate(depth="full")
 
+    # Minimum best cosine score to trust retrieved context.
+    # Below this threshold the system abstains ("I don't know").
+    _ABSTENTION_THRESHOLD = 0.25
+
     async def answer_query(
         self,
         query: MemoryQuery,
@@ -249,11 +302,24 @@ class AliveMemorySystem(MemorySystemAdapter):
         if not self._memory:
             return "[error: memory not initialized]"
 
-        # Recall from alive's three-tier memory (focused — fewer turns, less noise)
-        ctx = await self._memory.recall(query=query.question, limit=12)
+        # Optional LLM query expansion to bridge semantic gaps
+        expanded = await _expand_query(query.question, llm_config)
+        search_query = f"{query.question} {expanded}" if expanded else query.question
+
+        # Recall from alive's three-tier memory
+        ctx = await self._memory.recall(query=search_query, limit=20)
 
         # Stash retrieved session IDs for R@k measurement
         self._last_retrieved_session_ids = list(ctx.retrieved_session_ids)
+
+        # Abstention gate: if best cold search score is too low, don't
+        # force the LLM to hallucinate from weak/irrelevant context.
+        best_score = max(
+            (h.get("cosine_score", 0.0) for h in ctx.cold_hits),
+            default=0.0,
+        )
+        if best_score < self._ABSTENTION_THRESHOLD:
+            return "I don't know"
 
         # No backfill — matching turns only. Full sessions dilute context.
         context = _build_session_context(
