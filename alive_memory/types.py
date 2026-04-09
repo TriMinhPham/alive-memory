@@ -139,6 +139,8 @@ class RecallContext:
     totem_facts: list[str] = field(default_factory=list)
     trait_facts: list[str] = field(default_factory=list)
     extra_context: list[str] = field(default_factory=list)
+    retrieved_session_ids: list[str] = field(default_factory=list)
+    cold_hits: list[dict] = field(default_factory=list)
     query: str = ""
     total_hits: int = 0
 

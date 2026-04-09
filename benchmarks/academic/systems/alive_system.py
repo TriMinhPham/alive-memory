@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections import defaultdict
 
 from alive_memory import AliveMemory, EventType
+from alive_memory.types import RecallContext
 from benchmarks.academic.harness.base import (
     ConversationTurn,
     MemoryQuery,
@@ -27,6 +29,93 @@ _ROLE_TO_EVENT = {
     "observation": EventType.OBSERVATION,
     "action": EventType.ACTION,
 }
+
+
+def _build_session_context(
+    ctx: RecallContext,
+    backfill_turns: list[dict] | None = None,
+    session_date_map: dict[str, str] | None = None,
+) -> str:
+    """Build coherent session context for LLM answer generation.
+
+    If backfill_turns is provided, uses full session turns (all turns
+    from top sessions, not just the ones that matched). Otherwise falls
+    back to regrouping the retrieved cold hits.
+
+    session_date_map: external session_id→date lookup from raw dataset,
+    avoids needing dates in cold_memory (no re-prepare required).
+    """
+    # Determine session ranking from cold hits
+    session_best_score: dict[str, float] = {}
+    for hit in ctx.cold_hits:
+        sid = hit.get("session_id") or "unknown"
+        score = hit.get("cosine_score", 0.0)
+        if score > session_best_score.get(sid, 0.0):
+            session_best_score[sid] = score
+
+    # Session dates: prefer external map, fall back to cold_memory metadata
+    session_dates: dict[str, str] = dict(session_date_map) if session_date_map else {}
+
+    if backfill_turns:
+        # Full sessions from backfill — group by session_id
+        sessions: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        for turn in backfill_turns:
+            sid = turn.get("session_id") or "unknown"
+            turn_idx = turn.get("turn_index") or 0
+            content = turn.get("raw_content") or turn.get("content", "")
+            sessions[sid].append((turn_idx, content))
+            # Extract date from metadata (set during intake from haystack_dates)
+            meta = turn.get("metadata", {})
+            if sid not in session_dates:
+                ts = meta.get("timestamp") or turn.get("created_at", "")
+                if ts:
+                    # Normalize to just the date part
+                    session_dates[sid] = ts.split("T")[0].split(" ")[0]
+    elif ctx.cold_hits:
+        # Fallback: regroup retrieved hits only
+        sessions = defaultdict(list)
+        for hit in ctx.cold_hits:
+            sid = hit.get("session_id") or "unknown"
+            turn_idx = hit.get("turn_index") or 0
+            content = hit.get("_content") or hit.get("raw_content") or hit.get("content", "")
+            sessions[sid].append((turn_idx, content))
+    else:
+        # Last resort: flat context
+        parts: list[str] = []
+        if ctx.journal_entries:
+            parts.append("Conversation history:\n" + "\n".join(ctx.journal_entries[:10]))
+        if ctx.totem_facts:
+            parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
+        if ctx.trait_facts:
+            parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
+        return "\n\n".join(parts)
+
+    # Sort sessions by best retrieval score
+    sorted_sessions = sorted(
+        sessions.items(),
+        key=lambda x: session_best_score.get(x[0], 0.0),
+        reverse=True,
+    )
+
+    # Build session blocks — top 3 sessions, max 8 turns each to cut noise
+    blocks: list[str] = []
+    for sid, turns in sorted_sessions[:3]:
+        turns.sort(key=lambda x: x[0])
+        turn_lines = [content for _, content in turns[:8]]
+        date_str = session_dates.get(sid, "")
+        header = f"Session (date: {date_str}):" if date_str else f"Session {sid}:"
+        blocks.append(header + "\n" + "\n".join(turn_lines))
+
+    context_parts: list[str] = []
+    if blocks:
+        context_parts.append("\n\n".join(blocks))
+
+    if ctx.totem_facts:
+        context_parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
+    if ctx.trait_facts:
+        context_parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
+
+    return "\n\n".join(context_parts)
 
 
 class AliveMemorySystem(MemorySystemAdapter):
@@ -144,32 +233,27 @@ class AliveMemorySystem(MemorySystemAdapter):
         if self._memory:
             await self._memory.consolidate(depth="full")
 
-    async def answer_query(self, query: MemoryQuery, llm_config: dict) -> str:
+    async def answer_query(
+        self,
+        query: MemoryQuery,
+        llm_config: dict,
+        session_date_map: dict[str, str] | None = None,
+    ) -> str:
         if not self._memory:
             return "[error: memory not initialized]"
 
-        # Recall from alive's three-tier memory
-        ctx = await self._memory.recall(query=query.question, limit=10)
+        # Recall from alive's three-tier memory (focused — fewer turns, less noise)
+        ctx = await self._memory.recall(query=query.question, limit=12)
 
-        # Build context from all tiers
-        context_parts: list[str] = []
+        # Stash retrieved session IDs for R@k measurement
+        self._last_retrieved_session_ids = list(ctx.retrieved_session_ids)
 
-        if ctx.journal_entries:
-            context_parts.append("Journal entries:\n" + "\n".join(ctx.journal_entries[:5]))
-        if ctx.visitor_notes:
-            context_parts.append("Visitor notes:\n" + "\n".join(ctx.visitor_notes[:3]))
-        if ctx.self_knowledge:
-            context_parts.append("Self-knowledge:\n" + "\n".join(ctx.self_knowledge[:3]))
-        if hasattr(ctx, "reflections") and ctx.reflections:
-            context_parts.append("Reflections:\n" + "\n".join(ctx.reflections[:3]))
-        if ctx.totem_facts:
-            context_parts.append("Known facts:\n" + "\n".join(ctx.totem_facts[:10]))
-        if ctx.trait_facts:
-            context_parts.append("Traits:\n" + "\n".join(ctx.trait_facts[:10]))
-        if hasattr(ctx, "cold_echoes") and ctx.cold_echoes:
-            context_parts.append("Historical echoes:\n" + "\n".join(ctx.cold_echoes[:3]))
-
-        context = "\n\n".join(context_parts)
+        # No backfill — matching turns only. Full sessions dilute context.
+        context = _build_session_context(
+            ctx,
+            backfill_turns=None,
+            session_date_map=session_date_map,
+        )
 
         return await llm_answer(
             question=query.question,

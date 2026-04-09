@@ -328,6 +328,14 @@ class BaseStorage(ABC):
         """
         ...
 
+    @abstractmethod
+    async def get_session_turns(
+        self,
+        session_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Fetch all cold_memory entries for given session IDs, ordered by turn_index."""
+        ...
+
     # ── Visitors ────────────────────────────────────────────────────
 
     @abstractmethod

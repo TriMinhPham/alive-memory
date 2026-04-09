@@ -10,6 +10,22 @@ import os
 from dataclasses import dataclass
 
 
+def _extract_answer(text: str) -> str:
+    """Extract the final answer from chain-of-thought response.
+
+    Looks for the last "ANSWER: ..." line. Falls back to full text
+    if no ANSWER line is found.
+    """
+    lines = text.strip().split("\n")
+    # Search from bottom up for the last ANSWER: line
+    for line in reversed(lines):
+        stripped = line.strip()
+        if stripped.upper().startswith("ANSWER:"):
+            return stripped[7:].strip()
+    # No ANSWER: line found — return full text
+    return text.strip()
+
+
 @dataclass
 class LLMTracker:
     """Tracks LLM usage across calls."""
@@ -48,17 +64,23 @@ async def llm_answer(
 
     if context:
         prompt = (
-            f"Based on the following conversation history, answer the question.\n\n"
-            f"Conversation history:\n{context}\n\n"
+            f"You are answering questions about a user's past conversations. "
+            f"The relevant conversation sessions are provided below.\n\n"
+            f"{context}\n\n"
             f"Question: {question}\n\n"
-            f"Answer concisely. If the information is not in the history, "
-            f"say 'I don't know'."
+            f"Instructions:\n"
+            f"1. Search the conversations for the answer.\n"
+            f"2. If the same fact was updated across sessions, use the MOST RECENT value "
+            f"(check the session dates).\n"
+            f"3. If NONE of the conversations discuss the topic asked about, "
+            f"write ANSWER: I don't know\n"
+            f"4. Write your final answer after \"ANSWER: \" — ONLY the specific fact "
+            f"(a name, date, place, number, or short phrase). No explanation on the ANSWER line."
         )
     else:
         prompt = (
-            f"Answer the following question. If you don't have enough "
-            f"information, say 'I don't know'.\n\n"
-            f"Question: {question}"
+            f"Question: {question}\n\n"
+            f"ANSWER: I don't know"
         )
 
     try:
@@ -81,6 +103,8 @@ async def llm_answer(
             tracker.total_calls += 1
             usage = data.get("usage", {})
             tracker.total_tokens += usage.get("total_tokens", 0)
-            return data["choices"][0]["message"]["content"].strip()
+            raw = data["choices"][0]["message"]["content"].strip()
+            # Extract the ANSWER: line if present (chain-of-thought format)
+            return _extract_answer(raw)
     except Exception as e:
         return f"[error: {e}]"
