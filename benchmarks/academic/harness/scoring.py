@@ -47,12 +47,53 @@ def exact_match(prediction: str, reference: str) -> float:
 
 
 def substring_match(prediction: str, references: list[str]) -> float:
-    """Check if any reference substring appears in prediction."""
+    """Check if any reference substring appears in prediction (or vice versa)."""
     pred_norm = normalize_text(prediction)
+    if not pred_norm:
+        return 0.0
     for ref in references:
         ref_norm = normalize_text(ref)
-        if ref_norm and ref_norm in pred_norm:
+        if ref_norm and (ref_norm in pred_norm or pred_norm in ref_norm):
             return 1.0
+    return 0.0
+
+
+# ---------------------------------------------------------------------------
+# Numeric matching — handles "4" vs "four", "7 days" vs "7 days. 8 days …"
+# ---------------------------------------------------------------------------
+
+_WORD_TO_NUM: dict[str, str] = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+    "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+    "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
+    "forty": "40", "fifty": "50",
+}
+
+
+def _extract_numbers(text: str) -> set[str]:
+    """Extract all numeric values from text (digits and number words)."""
+    text_lower = text.lower()
+    nums: set[str] = set()
+    for m in re.finditer(r"\b\d+(?:\.\d+)?\b", text_lower):
+        nums.add(m.group())
+    for word, digit in _WORD_TO_NUM.items():
+        if re.search(r"\b" + word + r"\b", text_lower):
+            nums.add(digit)
+    return nums
+
+
+def numeric_match(prediction: str, reference: str) -> float:
+    """Score 1.0 if ALL numbers in prediction appear in reference.
+
+    Requires full numeric agreement: "June 14 2021" vs "June 14 2022"
+    would fail because "2021" is not in the reference's number set.
+    """
+    pred_nums = _extract_numbers(prediction)
+    ref_nums = _extract_numbers(reference)
+    if pred_nums and ref_nums and pred_nums <= ref_nums:
+        return 1.0
     return 0.0
 
 
