@@ -119,7 +119,36 @@ async def recall(
                 reranked.append((fused, hit, content))
             reranked.sort(key=lambda x: x[0], reverse=True)
 
-            for _, hit, content in reranked[:limit]:
+            # Session-diverse selection: round-robin across sessions so
+            # multi-session questions get evidence from different sessions
+            # instead of clustering in the highest-scoring one.
+            from collections import defaultdict as _defaultdict
+
+            _session_buckets: dict[str, list] = _defaultdict(list)
+            for item in reranked:
+                sid = item[1].get("session_id") or "unknown"
+                _session_buckets[sid].append(item)
+
+            _sorted_sids = sorted(
+                _session_buckets,
+                key=lambda s: _session_buckets[s][0][0],
+                reverse=True,
+            )
+
+            diverse: list[tuple] = []
+            _round = 0
+            while len(diverse) < limit:
+                added = False
+                for sid in _sorted_sids:
+                    bucket = _session_buckets[sid]
+                    if _round < len(bucket) and len(diverse) < limit:
+                        diverse.append(bucket[_round])
+                        added = True
+                _round += 1
+                if not added:
+                    break
+
+            for _, hit, content in diverse:
                 if content in _seen:
                     continue
                 _seen.add(content)
