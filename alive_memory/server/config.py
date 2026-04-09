@@ -14,6 +14,7 @@ class ServerConfig:
     memory_dir: str = "memory_hot"
     config_path: str | None = None
     api_key: str | None = None
+    llm: str | None = None
     cors_origins: list[str] = ["*"]
 
     def __init__(self) -> None:
@@ -22,6 +23,7 @@ class ServerConfig:
         self.db_path = os.getenv("ALIVE_DB", self.db_path)
         self.memory_dir = os.getenv("ALIVE_MEMORY_DIR", self.memory_dir)
         self.config_path = os.getenv("ALIVE_CONFIG") or None
+        self.llm = os.getenv("ALIVE_LLM") or None
         self.api_key = os.getenv("ALIVE_API_KEY") or None
 
         origins_env = os.getenv("ALIVE_CORS_ORIGINS")
