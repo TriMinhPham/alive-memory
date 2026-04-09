@@ -180,7 +180,7 @@ class AliveMemorySystem(MemorySystemAdapter):
             # Only attribute visitor_name to user turns — assistant turns are
             # things WE said, not visitor input.
             is_visitor = turn.role in ("user", "human")
-            speaker = (turn.metadata or {}).get("speaker", "") if is_visitor else ""
+            speaker = ((turn.metadata or {}).get("speaker", "") or ("user" if is_visitor else ""))
             metadata = {
                 "session_id": turn.session_id,
                 "turn_id": turn.turn_id,
