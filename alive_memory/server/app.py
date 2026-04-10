@@ -44,6 +44,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             storage=config.db_path,
             memory_dir=config.memory_dir,
             config=config.config_path,
+            llm=config.llm,
+            llm_model=config.llm_model,
         )
         await memory.initialize()
         app.state.memory = memory
