@@ -116,11 +116,17 @@ class MemoryAgentBenchDataset(DatasetAdapter):
         max_rows_env = os.environ.get("ALIVE_BENCH_HF_MAX_ROWS")
         max_rows = int(max_rows_env) if max_rows_env else None
 
+        # Capped runs use a distinct cache file so a smoke-test cap cannot
+        # poison the full-run cache (and a full cache cannot silently mask a
+        # later cap).
+        suffix = f"capped{max_rows}" if max_rows is not None else "full"
+
         for split_name in _HF_SPLITS:
-            cache_file = cache_dir / f"{split_name}.jsonl"
+            cache_file = cache_dir / f"{split_name}.{suffix}.jsonl"
             if not cache_file.exists():
                 self._download_split(split_name, cache_file, max_rows=max_rows)
 
+            count = 0
             with cache_file.open() as f:
                 for line in f:
                     line = line.strip()
@@ -129,6 +135,9 @@ class MemoryAgentBenchDataset(DatasetAdapter):
                     row = json.loads(line)
                     row["_split"] = split_name
                     rows.append(row)
+                    count += 1
+                    if max_rows is not None and count >= max_rows:
+                        break
 
         return rows
 
@@ -241,7 +250,12 @@ class MemoryAgentBenchDataset(DatasetAdapter):
         gt: dict[str, GroundTruth] = {}
 
         for idx, question in enumerate(questions):
-            query_id = str(qa_ids[idx]) if idx < len(qa_ids) else f"{row_id}_q{idx:04d}"
+            # qa_pair_ids in metadata are NOT globally unique across rows or
+            # splits (e.g. "eventqa_full_no0" repeats), so always namespace
+            # by row_id to avoid silent overwrites in self._ground_truth and
+            # downstream prediction dicts.
+            local_qid = str(qa_ids[idx]) if idx < len(qa_ids) else f"q{idx:04d}"
+            query_id = f"{row_id}::{local_qid}"
             raw_answer = answers[idx] if idx < len(answers) else ""
             answer = _answer_to_text(raw_answer)
             aliases = _answer_aliases(raw_answer)

@@ -44,10 +44,21 @@ class AutobiographicalScore:
 
 
 def infer_autobiographical_axes(query: dict, ground_truth: dict) -> list[str]:
-    """Infer Track E axes from explicit metadata or query/ground-truth shape."""
+    """Infer Track E axes from explicit metadata or query/ground-truth shape.
+
+    Heuristic inference only runs when the query/ground-truth declares
+    `track == "autobiographical"`. Without that, generic benchmark queries
+    (e.g. `negative_recall`, `entity_tracking`) on non-Track-E streams would
+    pick up axes by accident and force an autobiographical scorecard onto
+    every report.
+    """
     explicit = ground_truth.get("autobiographical_axes") or query.get("autobiographical_axes")
     if explicit:
         return sorted(set(explicit))
+
+    track = query.get("track") or ground_truth.get("track")
+    if track != "autobiographical":
+        return []
 
     query_text = query.get("query", "").lower()
     expected_text = " ".join(ground_truth.get("expected_memories", [])).lower()

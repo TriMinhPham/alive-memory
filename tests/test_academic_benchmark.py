@@ -279,9 +279,12 @@ class TestMemoryAgentBenchCategories:
         )
 
         assert len(dataset.get_instances()) == 1
-        assert dataset.get_queries()[0].query_id == "qa_1"
+        # Query IDs are namespaced by row_id so duplicate qa_pair_ids across
+        # rows/splits cannot silently overwrite each other.
+        qid = dataset.get_queries()[0].query_id
+        assert qid == "Accurate_Retrieval_0000::qa_1"
         assert dataset.get_queries()[0].category == "accurate_retrieval"
-        gt = dataset.get_ground_truth()["qa_1"]
+        gt = dataset.get_ground_truth()[qid]
         assert gt.answer == "France"
         assert "in France" in gt.metadata["answer_aliases"]
 
